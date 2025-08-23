@@ -187,6 +187,32 @@ impl EventHandler {
                     app_state.select_previous_key();
                 }
             }
+            (_, KeyCode::Right) => {
+                if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
+                    // Load selected key value and switch focus to Key Viewer
+                    if let Some(key_info) = app_state.get_selected_key_info() {
+                        let key_name = key_info.name.clone();
+                        match Self::load_key_value(app_state, &key_name).await {
+                            Ok(()) => {
+                                // Switch focus to Key Viewer panel
+                                app_state.ui_state.focused_panel = FocusedPanel::KeyViewer;
+                                app_state.set_status(format!("Loaded key: {}", key_name));
+                            }
+                            Err(err) => {
+                                app_state.set_status(format!("Failed to load key {}: {}", key_name, err));
+                            }
+                        }
+                    } else {
+                        app_state.set_status("No key selected".to_string());
+                    }
+                }
+            }
+            (_, KeyCode::Left) => {
+                if matches!(app_state.ui_state.focused_panel, FocusedPanel::KeyViewer) {
+                    // Switch focus back to Database Browser
+                    app_state.ui_state.focused_panel = FocusedPanel::DatabaseBrowser;
+                }
+            }
             
             // Page navigation in database browser - optimized
             (_, KeyCode::PageUp) => {
@@ -460,5 +486,92 @@ impl EventHandler {
             app_state.set_status("No key selected".to_string());
         }
         Ok(())
+    }
+    
+    /// Load key value and metadata into Key Viewer panel
+    async fn load_key_value(app_state: &mut AppState, key_name: &str) -> AppResult<()> {
+        if let Some(connection) = app_state.get_active_connection_mut() {
+            // Get key type first
+            let key_type = connection.get_key_type(key_name).await?
+                .trim().to_string();
+            
+            if key_type == "none" {
+                return Err(crate::error::AppError::Generic("Key does not exist".to_string()));
+            }
+            
+            // Get key TTL
+            let ttl = match connection.get_key_ttl(key_name).await {
+                Ok(ttl_val) => {
+                    match ttl_val {
+                        -2 => None, // Key doesn't exist
+                        -1 => Some(-1), // No expiry
+                        ttl if ttl > 0 => Some(ttl), // Has expiry
+                        _ => None,
+                    }
+                }
+                Err(_) => None,
+            };
+            
+            // Load value based on key type
+            let redis_value = match key_type.as_str() {
+                "string" => {
+                    let value = connection.get_string(key_name).await?;
+                    crate::redis::value_types::RedisValue::String(value)
+                }
+                "hash" => {
+                    let fields = connection.get_hash_all(key_name).await?;
+                    crate::redis::value_types::RedisValue::Hash(fields)
+                }
+                "list" => {
+                    let elements = connection.get_list_range(key_name, 0, -1).await?;
+                    crate::redis::value_types::RedisValue::List(elements)
+                }
+                "set" => {
+                    let (_, members) = connection.get_set_members(key_name, 0, 1000).await?;
+                    crate::redis::value_types::RedisValue::Set(members)
+                }
+                "zset" => {
+                    let members_with_scores = connection.get_zset_range_with_scores(key_name, 0, -1).await?;
+                    crate::redis::value_types::RedisValue::ZSet(members_with_scores)
+                }
+                "stream" => {
+                    let entries = connection.get_stream_range(key_name, "-", "+", Some(100)).await?;
+                    // Convert connection::StreamEntry to value_types::StreamEntry
+                    let converted_entries: Vec<crate::redis::value_types::StreamEntry> = entries
+                        .into_iter()
+                        .map(|e| crate::redis::value_types::StreamEntry {
+                            id: e.id,
+                            fields: e.fields,
+                        })
+                        .collect();
+                    crate::redis::value_types::RedisValue::Stream(converted_entries)
+                }
+                _ => {
+                    return Err(crate::error::AppError::Generic(format!("Unsupported key type: {}", key_type)));
+                }
+            };
+            
+            // Update Key Viewer state
+            let key_viewer = &mut app_state.ui_state.key_viewer;
+            key_viewer.current_key = Some(key_name.to_string());
+            key_viewer.value = Some(redis_value);
+            key_viewer.metadata = Some(crate::app::KeyMetadata {
+                key_type: key_type.clone(),
+                ttl,
+                size: 0, // TODO: Calculate size based on value
+                encoding: None,
+            });
+            
+            // Reset viewer state
+            key_viewer.current_page = 0;
+            key_viewer.scroll_position = 0;
+            key_viewer.edit_mode = false;
+            key_viewer.edit_buffer.clear();
+            key_viewer.has_unsaved_changes = false;
+            
+            Ok(())
+        } else {
+            Err(crate::error::AppError::Generic("No active connection".to_string()))
+        }
     }
 }
