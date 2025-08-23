@@ -113,7 +113,7 @@ pub struct ConnectionListState {
 }
 
 /// State for database browser panel
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DatabaseBrowserState {
     /// Available databases
     pub databases: Vec<u8>,
@@ -137,6 +137,33 @@ pub struct DatabaseBrowserState {
     pub scan_complete: bool,
     /// Total key count for current database
     pub total_keys: Option<usize>,
+    /// Tree view for hierarchical key display
+    pub key_tree: crate::ui::tree_view::KeyTree,
+    /// Whether to use tree view (true) or flat list view (false)
+    pub use_tree_view: bool,
+    /// Key separator for tree hierarchy (default: ":")
+    pub tree_separator: String,
+}
+
+impl Default for DatabaseBrowserState {
+    fn default() -> Self {
+        Self {
+            databases: Vec::new(),
+            selected_database: 0,
+            selected_key_index: 0,
+            scroll_offset: 0,
+            filter_pattern: String::new(),
+            search_mode: false,
+            keys: Vec::new(),
+            scan_cursor: 0,
+            loading: false,
+            scan_complete: false,
+            total_keys: None,
+            key_tree: crate::ui::tree_view::KeyTree::new(":".to_string()),
+            use_tree_view: true, // Enable tree view by default
+            tree_separator: ":".to_string(),
+        }
+    }
 }
 
 /// Information about a Redis key
@@ -1636,6 +1663,11 @@ impl AppState {
                         // Append new keys to existing ones
                         self.ui_state.database_browser.keys.extend(key_infos);
                         
+                        // Rebuild tree view if enabled
+                        if self.ui_state.database_browser.use_tree_view {
+                            self.rebuild_tree_view();
+                        }
+                        
                         let final_status = format!(
                             "Loaded {} keys", 
                             self.ui_state.database_browser.keys.len()
@@ -1754,21 +1786,52 @@ impl AppState {
     /// Select next key in the browser - optimized for performance
     pub fn select_next_key(&mut self) {
         let browser = &mut self.ui_state.database_browser;
-        if !browser.keys.is_empty() {
-            let old_index = browser.selected_key_index;
-            browser.selected_key_index = (browser.selected_key_index + 1).min(browser.keys.len() - 1);
-            
-            // Only update if index actually changed
-            if old_index != browser.selected_key_index {
-                // Adjust scroll offset if needed
-                let visible_count = 10; // Number of keys visible at once
-                if browser.selected_key_index >= browser.scroll_offset + visible_count {
-                    browser.scroll_offset = browser.selected_key_index - visible_count + 1;
-                }
+        
+        if browser.use_tree_view {
+            // Tree view navigation
+            let visible_count = browser.key_tree.visible_count();
+            if visible_count > 0 {
+                let old_index = browser.selected_key_index;
+                browser.selected_key_index = (browser.selected_key_index + 1).min(visible_count - 1);
                 
-                // Update selected key - use reference to avoid cloning when possible
-                if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
-                    self.selected_key = Some(key_info.name.clone());
+                if old_index != browser.selected_key_index {
+                    // Adjust scroll offset if needed
+                    let display_count = 10;
+                    if browser.selected_key_index >= browser.scroll_offset + display_count {
+                        browser.scroll_offset = browser.selected_key_index - display_count + 1;
+                    }
+                    
+                    // Update selected key from tree
+                    if let Some(display_info) = browser.key_tree.get_visible_node_info(browser.selected_key_index) {
+                        if display_info.is_leaf {
+                            if let Some(key_info) = &display_info.key_info {
+                                self.selected_key = Some(key_info.name.clone());
+                            }
+                        } else {
+                            // For non-leaf nodes, clear selected key
+                            self.selected_key = None;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Flat list navigation
+            if !browser.keys.is_empty() {
+                let old_index = browser.selected_key_index;
+                browser.selected_key_index = (browser.selected_key_index + 1).min(browser.keys.len() - 1);
+                
+                // Only update if index actually changed
+                if old_index != browser.selected_key_index {
+                    // Adjust scroll offset if needed
+                    let visible_count = 10; // Number of keys visible at once
+                    if browser.selected_key_index >= browser.scroll_offset + visible_count {
+                        browser.scroll_offset = browser.selected_key_index - visible_count + 1;
+                    }
+                    
+                    // Update selected key - use reference to avoid cloning when possible
+                    if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                        self.selected_key = Some(key_info.name.clone());
+                    }
                 }
             }
         }
@@ -1777,20 +1840,49 @@ impl AppState {
     /// Select previous key in the browser - optimized for performance
     pub fn select_previous_key(&mut self) {
         let browser = &mut self.ui_state.database_browser;
-        if browser.selected_key_index > 0 {
-            let old_index = browser.selected_key_index;
-            browser.selected_key_index -= 1;
-            
-            // Only update if index actually changed
-            if old_index != browser.selected_key_index {
-                // Adjust scroll offset if needed
-                if browser.selected_key_index < browser.scroll_offset {
-                    browser.scroll_offset = browser.selected_key_index;
-                }
+        
+        if browser.use_tree_view {
+            // Tree view navigation
+            if browser.selected_key_index > 0 {
+                let old_index = browser.selected_key_index;
+                browser.selected_key_index -= 1;
                 
-                // Update selected key - use reference to avoid cloning when possible
-                if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
-                    self.selected_key = Some(key_info.name.clone());
+                if old_index != browser.selected_key_index {
+                    // Adjust scroll offset if needed
+                    if browser.selected_key_index < browser.scroll_offset {
+                        browser.scroll_offset = browser.selected_key_index;
+                    }
+                    
+                    // Update selected key from tree
+                    if let Some(display_info) = browser.key_tree.get_visible_node_info(browser.selected_key_index) {
+                        if display_info.is_leaf {
+                            if let Some(key_info) = &display_info.key_info {
+                                self.selected_key = Some(key_info.name.clone());
+                            }
+                        } else {
+                            // For non-leaf nodes, clear selected key
+                            self.selected_key = None;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Flat list navigation
+            if browser.selected_key_index > 0 {
+                let old_index = browser.selected_key_index;
+                browser.selected_key_index -= 1;
+                
+                // Only update if index actually changed
+                if old_index != browser.selected_key_index {
+                    // Adjust scroll offset if needed
+                    if browser.selected_key_index < browser.scroll_offset {
+                        browser.scroll_offset = browser.selected_key_index;
+                    }
+                    
+                    // Update selected key - use reference to avoid cloning when possible
+                    if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                        self.selected_key = Some(key_info.name.clone());
+                    }
                 }
             }
         }
@@ -1839,10 +1931,17 @@ impl AppState {
         self.load_keys().await
     }
     
-    /// Get currently selected key info
+    /// Get currently selected key info (works for both tree and flat view)
     pub fn get_selected_key_info(&self) -> Option<&KeyInfo> {
         let browser = &self.ui_state.database_browser;
-        browser.keys.get(browser.selected_key_index)
+        
+        if browser.use_tree_view {
+            // In tree view, get key info from tree structure
+            browser.key_tree.get_key_info_at_index(browser.selected_key_index)
+        } else {
+            // In flat view, get from keys vector
+            browser.keys.get(browser.selected_key_index)
+        }
     }
     
     /// Enter search mode for key filtering
@@ -1862,6 +1961,59 @@ impl AppState {
             self.ui_state.database_browser.scan_cursor = 0;
             self.ui_state.database_browser.scan_complete = false;
             self.ui_state.database_browser.selected_key_index = 0;
+        }
+    }
+    
+    /// Rebuild tree view from current keys
+    pub fn rebuild_tree_view(&mut self) {
+        let browser = &mut self.ui_state.database_browser;
+        browser.key_tree.build_from_keys(&browser.keys);
+        
+        // Update selected index to match current key in tree
+        if let Some(selected_key) = &self.selected_key {
+            if let Some(tree_index) = browser.key_tree.find_key_index(selected_key) {
+                browser.selected_key_index = tree_index;
+            }
+        }
+    }
+    
+    /// Toggle tree view mode
+    pub fn toggle_tree_view(&mut self) {
+        let browser = &mut self.ui_state.database_browser;
+        browser.use_tree_view = !browser.use_tree_view;
+        
+        if browser.use_tree_view {
+            // Build tree from current keys
+            browser.key_tree.build_from_keys(&browser.keys);
+            
+            // Update selected index to match current key in tree
+            if let Some(selected_key) = &self.selected_key {
+                if let Some(tree_index) = browser.key_tree.find_key_index(selected_key) {
+                    browser.selected_key_index = tree_index;
+                }
+            }
+        }
+    }
+    
+    /// Toggle node expansion in tree view
+    pub fn toggle_tree_node(&mut self) {
+        let browser = &mut self.ui_state.database_browser;
+        if browser.use_tree_view {
+            if browser.key_tree.toggle_node_at_index(browser.selected_key_index) {
+                // Tree was rebuilt, may need to adjust selected index
+                let visible_count = browser.key_tree.visible_count();
+                if browser.selected_key_index >= visible_count && visible_count > 0 {
+                    browser.selected_key_index = visible_count - 1;
+                }
+                
+                // Update scroll offset if needed
+                let display_count = 10;
+                if browser.selected_key_index >= browser.scroll_offset + display_count {
+                    browser.scroll_offset = browser.selected_key_index - display_count + 1;
+                } else if browser.selected_key_index < browser.scroll_offset {
+                    browser.scroll_offset = browser.selected_key_index;
+                }
+            }
         }
     }
     

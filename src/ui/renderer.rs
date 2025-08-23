@@ -178,50 +178,122 @@ impl AppRenderer {
                     "No keys found\n\nPress 'r' to refresh\nPress '/' to search".to_string()
                 }
             } else {
-                // Show list of keys
+                // Show list of keys - either as tree or flat list
                 let mut content = String::new();
-                let visible_keys = browser_state.keys.iter()
-                    .skip(browser_state.scroll_offset)
-                    .take(10); // Show up to 10 keys at once
                 
-                for (i, key_info) in visible_keys.enumerate() {
-                    let actual_index = browser_state.scroll_offset + i;
-                    let is_selected = actual_index == browser_state.selected_key_index;
-                    let marker = if is_selected { "> " } else { "  " };
+                if browser_state.use_tree_view {
+                    // Tree view display
+                    let visible_nodes = browser_state.key_tree.visible_nodes.iter()
+                        .enumerate()
+                        .skip(browser_state.scroll_offset)
+                        .take(10); // Show up to 10 nodes at once
                     
-                    // Key type icon
-                    let type_icon = match key_info.key_type.as_deref() {
-                        Some("string") => "🔤", // 🔤
-                        Some("hash") => "📋", // 📋
-                        Some("list") => "📜", // 📜
-                        Some("set") => "📊", // 📊
-                        Some("zset") => "📊", // 📊
-                        Some("stream") => "🌊", // 🌊
-                        _ => "●", // ● (unknown)
-                    };
+                    for (i, _node_path) in visible_nodes {
+                        let actual_index = browser_state.scroll_offset + i;
+                        let is_selected = actual_index == browser_state.selected_key_index;
+                        let marker = if is_selected { "> " } else { "  " };
+                        
+                        if let Some(display_info) = browser_state.key_tree.get_visible_node_info(actual_index) {
+                            // Create indentation based on depth
+                            let indent = "  ".repeat(display_info.depth);
+                            
+                            if display_info.is_leaf {
+                                // This is an actual Redis key
+                                let type_icon = if let Some(key_info) = &display_info.key_info {
+                                    match key_info.key_type.as_deref() {
+                                        Some("string") => "🔤", // 🔤
+                                        Some("hash") => "📋", // 📋
+                                        Some("list") => "📜", // 📜
+                                        Some("set") => "📊", // 📊
+                                        Some("zset") => "📊", // 📊
+                                        Some("stream") => "🌊", // 🌊
+                                        _ => "●", // ● (unknown)
+                                    }
+                                } else {
+                                    "●"
+                                };
+                                
+                                // Add TTL info if available
+                                let ttl_info = if let Some(key_info) = &display_info.key_info {
+                                    match key_info.ttl {
+                                        Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
+                                        Some(-1) => " (no exp)".to_string(),
+                                        _ => String::new(),
+                                    }
+                                } else {
+                                    String::new()
+                                };
+                                
+                                // Truncate long key names
+                                let display_name = if display_info.name.len() > 15 {
+                                    format!("{}...", &display_info.name[..12])
+                                } else {
+                                    display_info.name.clone()
+                                };
+                                
+                                content.push_str(&format!("{}{}{} {}{}\n", marker, indent, type_icon, display_name, ttl_info));
+                            } else {
+                                // This is a folder/namespace node
+                                let folder_icon = if display_info.is_expanded {
+                                    "📂"
+                                } else {
+                                    "📁"
+                                };
+                                
+                                content.push_str(&format!("{}{}{} {}/\n", marker, indent, folder_icon, display_info.name));
+                            }
+                        }
+                    }
+                } else {
+                    // Flat list display (original implementation)
+                    let visible_keys = browser_state.keys.iter()
+                        .skip(browser_state.scroll_offset)
+                        .take(10); // Show up to 10 keys at once
                     
-                    // Add TTL info if available
-                    let ttl_info = match key_info.ttl {
-                        Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
-                        Some(-1) => " (no exp)".to_string(),
-                        _ => String::new(),
-                    };
-                    
-                    // Truncate long key names
-                    let display_name = if key_info.name.len() > 20 {
-                        format!("{}...", &key_info.name[..17])
-                    } else {
-                        key_info.name.clone()
-                    };
-                    
-                    content.push_str(&format!("{}{} {}{}\n", marker, type_icon, display_name, ttl_info));
+                    for (i, key_info) in visible_keys.enumerate() {
+                        let actual_index = browser_state.scroll_offset + i;
+                        let is_selected = actual_index == browser_state.selected_key_index;
+                        let marker = if is_selected { "> " } else { "  " };
+                        
+                        // Key type icon
+                        let type_icon = match key_info.key_type.as_deref() {
+                            Some("string") => "🔤", // 🔤
+                            Some("hash") => "📋", // 📋
+                            Some("list") => "📜", // 📜
+                            Some("set") => "📊", // 📊
+                            Some("zset") => "📊", // 📊
+                            Some("stream") => "🌊", // 🌊
+                            _ => "●", // ● (unknown)
+                        };
+                        
+                        // Add TTL info if available
+                        let ttl_info = match key_info.ttl {
+                            Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
+                            Some(-1) => " (no exp)".to_string(),
+                            _ => String::new(),
+                        };
+                        
+                        // Truncate long key names
+                        let display_name = if key_info.name.len() > 20 {
+                            format!("{}...", &key_info.name[..17])
+                        } else {
+                            key_info.name.clone()
+                        };
+                        
+                        content.push_str(&format!("{}{} {}{}\n", marker, type_icon, display_name, ttl_info));
+                    }
                 }
                 
                 if !browser_state.scan_complete {
                     content.push_str("\n[More keys available - scroll down]");
                 }
                 
-                content.push_str(&format!("\nr:Refresh /:Search del:Delete"));
+                let help_text = if browser_state.use_tree_view {
+                    "r:Refresh /:Search t:List View Enter:Expand/Collapse del:Delete"
+                } else {
+                    "r:Refresh /:Search t:Tree View del:Delete"
+                };
+                content.push_str(&format!("\n{}", help_text));
                 content
             }
         } else {

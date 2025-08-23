@@ -10,6 +10,7 @@ pub mod confirmation_dialog;
 pub mod export_import_dialog;
 pub mod bulk_operations_dialog;
 pub mod progress_bar;
+pub mod tree_view;
 
 pub use components::ValueDisplayComponent;
 pub use validation::*;
@@ -19,6 +20,7 @@ pub use confirmation_dialog::*;
 pub use export_import_dialog::*;
 pub use bulk_operations_dialog::*;
 pub use progress_bar::*;
+pub use tree_view::*;
 
 pub use layout::*;
 pub use themes::*;

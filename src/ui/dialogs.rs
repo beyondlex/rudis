@@ -54,7 +54,7 @@ impl DialogRenderer {
         frame.render_widget(
             Paragraph::new("")
                 .block(Block::bordered().title(title))
-                .style(Style::default().bg(Color::Blue)),
+                .style(Style::default().bg(Color::DarkGray)),
             area,
         );
     }
@@ -82,7 +82,7 @@ impl DialogRenderer {
             if is_focused {
                 Style::default().bg(Color::Yellow).fg(Color::Black)
             } else {
-                Style::default().bg(Color::Gray).fg(Color::White)
+                Style::default().bg(Color::DarkGray).fg(Color::White)
             }
         };
         

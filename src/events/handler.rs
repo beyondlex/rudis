@@ -94,10 +94,14 @@ impl EventHandler {
             (_, KeyCode::Enter) => {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::CommandInput) {
                     Self::execute_command(app_state).await?;
-                } else if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser)
-                    && app_state.ui_state.database_browser.search_mode {
-                    // Apply search filter
-                    app_state.apply_search_filter().await?;
+                } else if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
+                    if app_state.ui_state.database_browser.search_mode {
+                        // Apply search filter
+                        app_state.apply_search_filter().await?;
+                    } else if app_state.ui_state.database_browser.use_tree_view {
+                        // In tree view, Enter expands/collapses nodes
+                        app_state.toggle_tree_node();
+                    }
                 }
             }
             
@@ -123,6 +127,12 @@ impl EventHandler {
                             '/' => {
                                 // Enter search mode
                                 app_state.enter_search_mode();
+                            }
+                            't' => {
+                                // Toggle tree view mode
+                                app_state.toggle_tree_view();
+                                app_state.set_status(format!("Tree view: {}", 
+                                    if app_state.ui_state.database_browser.use_tree_view { "ON" } else { "OFF" }));
                             }
                             '1' => {
                                 app_state.set_view(crate::app::ViewMode::ConnectionList);
@@ -195,7 +205,7 @@ impl EventHandler {
                         match Self::load_key_value(app_state, &key_name).await {
                             Ok(()) => {
                                 // Switch focus to Key Viewer panel
-                                app_state.ui_state.focused_panel = FocusedPanel::KeyViewer;
+                                // app_state.ui_state.focused_panel = FocusedPanel::KeyViewer;
                                 app_state.set_status(format!("Loaded key: {}", key_name));
                             }
                             Err(err) => {
