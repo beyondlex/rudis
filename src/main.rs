@@ -79,13 +79,14 @@ impl App {
             // Draw the UI
             terminal.draw(|frame| self.render(frame))?;
             
-            // Handle events with timeout to allow for periodic updates
-            let event_timeout = Duration::from_millis(100);
+            // Handle events with shorter timeout for better responsiveness
+            let event_timeout = Duration::from_millis(16); // ~60 FPS for smooth navigation
             
-            // Check for crossterm events (user input)
+            // Check for crossterm events (user input) - prioritize immediate response
             if crossterm::event::poll(Duration::from_millis(0))
                 .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))? {
                 self.handle_crossterm_events().await?;
+                continue; // Process input immediately without waiting
             }
             
             // Check for application events (async operations)
@@ -526,6 +527,12 @@ impl App {
                     }
                 }
             }
+            AppEvent::RefreshData => {
+                // Handle background key loading for responsive navigation
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    let _ = self.state.load_more_keys().await;
+                }
+            }
             AppEvent::StatusMessage(msg) => {
                 self.state.set_status(msg);
             }
@@ -649,14 +656,17 @@ impl App {
                 }
             }
             
-            // Arrow key navigation
+            // Arrow key navigation - optimized for responsiveness
             (_, KeyCode::Down) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
                     self.state.select_next_key();
-                    // Load more keys if near the end
+                    // Only load more keys if we're very close to the end to avoid blocking
                     let browser = &self.state.ui_state.database_browser;
-                    if browser.selected_key_index >= browser.keys.len().saturating_sub(3) {
-                        self.state.load_more_keys().await?;
+                    if !browser.scan_complete && 
+                       browser.selected_key_index >= browser.keys.len().saturating_sub(1) &&
+                       !browser.loading {
+                        // Schedule async loading without blocking current navigation
+                        let _ = self.state.schedule_key_loading();
                     }
                 }
             }
@@ -666,24 +676,23 @@ impl App {
                 }
             }
             
-            // Page navigation in database browser
+            // Page navigation in database browser - optimized
             (_, KeyCode::PageUp) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
-                    // Move up by 5 keys
-                    for _ in 0..5 {
-                        self.state.select_previous_key();
-                    }
+                    // Move up by 5 keys in one operation for better performance
+                    self.state.select_key_by_offset(-5);
                 }
             }
             (_, KeyCode::PageDown) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
-                    // Move down by 5 keys or load more keys if needed
-                    for _ in 0..5 {
-                        self.state.select_next_key();
-                    }
-                    // Try to load more keys if we're near the end
-                    if !self.state.ui_state.database_browser.scan_complete {
-                        let _ = self.state.load_more_keys().await;
+                    // Move down by 5 keys in one operation for better performance
+                    self.state.select_key_by_offset(5);
+                    // Schedule loading if needed without blocking
+                    let browser = &self.state.ui_state.database_browser;
+                    if !browser.scan_complete && 
+                       browser.selected_key_index >= browser.keys.len().saturating_sub(3) &&
+                       !browser.loading {
+                        let _ = self.state.schedule_key_loading();
                     }
                 }
             }

@@ -633,34 +633,82 @@ impl AppState {
         Ok(())
     }
     
-    /// Select next key in the browser
+    /// Schedule key loading without blocking UI - for responsive navigation
+    pub fn schedule_key_loading(&mut self) -> AppResult<()> {
+        if !self.ui_state.database_browser.loading && !self.ui_state.database_browser.scan_complete {
+            // Send an async event to load more keys in the background
+            let _ = self.event_tx.send(crate::events::AppEvent::RefreshData);
+        }
+        Ok(())
+    }
+    
+    /// Select next key in the browser - optimized for performance
     pub fn select_next_key(&mut self) {
         let browser = &mut self.ui_state.database_browser;
         if !browser.keys.is_empty() {
-            let _old_index = browser.selected_key_index;
+            let old_index = browser.selected_key_index;
             browser.selected_key_index = (browser.selected_key_index + 1).min(browser.keys.len() - 1);
             
-            // Adjust scroll offset if needed
-            let visible_count = 10; // Number of keys visible at once
-            if browser.selected_key_index >= browser.scroll_offset + visible_count {
-                browser.scroll_offset = browser.selected_key_index - visible_count + 1;
-            }
-            
-            // Update selected key
-            if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
-                self.selected_key = Some(key_info.name.clone());
+            // Only update if index actually changed
+            if old_index != browser.selected_key_index {
+                // Adjust scroll offset if needed
+                let visible_count = 10; // Number of keys visible at once
+                if browser.selected_key_index >= browser.scroll_offset + visible_count {
+                    browser.scroll_offset = browser.selected_key_index - visible_count + 1;
+                }
+                
+                // Update selected key - use reference to avoid cloning when possible
+                if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                    self.selected_key = Some(key_info.name.clone());
+                }
             }
         }
     }
     
-    /// Select previous key in the browser
+    /// Select previous key in the browser - optimized for performance
     pub fn select_previous_key(&mut self) {
         let browser = &mut self.ui_state.database_browser;
         if browser.selected_key_index > 0 {
+            let old_index = browser.selected_key_index;
             browser.selected_key_index -= 1;
             
-            // Adjust scroll offset if needed
-            if browser.selected_key_index < browser.scroll_offset {
+            // Only update if index actually changed
+            if old_index != browser.selected_key_index {
+                // Adjust scroll offset if needed
+                if browser.selected_key_index < browser.scroll_offset {
+                    browser.scroll_offset = browser.selected_key_index;
+                }
+                
+                // Update selected key - use reference to avoid cloning when possible
+                if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                    self.selected_key = Some(key_info.name.clone());
+                }
+            }
+        }
+    }
+    
+    /// Select key by offset for efficient page navigation
+    pub fn select_key_by_offset(&mut self, offset: i32) {
+        let browser = &mut self.ui_state.database_browser;
+        if browser.keys.is_empty() {
+            return;
+        }
+        
+        let old_index = browser.selected_key_index;
+        let new_index = if offset < 0 {
+            browser.selected_key_index.saturating_sub((-offset) as usize)
+        } else {
+            (browser.selected_key_index + offset as usize).min(browser.keys.len() - 1)
+        };
+        
+        if old_index != new_index {
+            browser.selected_key_index = new_index;
+            
+            // Adjust scroll offset for the new position
+            let visible_count = 10;
+            if browser.selected_key_index >= browser.scroll_offset + visible_count {
+                browser.scroll_offset = browser.selected_key_index - visible_count + 1;
+            } else if browser.selected_key_index < browser.scroll_offset {
                 browser.scroll_offset = browser.selected_key_index;
             }
             
