@@ -169,7 +169,7 @@ impl App {
         // Style based on focus
         let is_connections_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::ConnectionList);
         let connections_style = if is_connections_focused {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            Style::default().fg(Color::White)
         } else {
             Style::default()
         };
@@ -278,7 +278,7 @@ impl App {
         // Style based on focus
         let is_db_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser);
         let db_style = if is_db_focused {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            Style::default().fg(Color::White)
         } else {
             Style::default()
         };
@@ -304,7 +304,7 @@ impl App {
         // Style based on focus
         let is_viewer_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::KeyViewer);
         let viewer_style = if is_viewer_focused {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            Style::default().fg(Color::White)
         } else {
             Style::default()
         };
@@ -335,7 +335,7 @@ impl App {
         // Style based on focus
         let is_command_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput);
         let command_style = if is_command_focused {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            Style::default().fg(Color::White)
         } else {
             Style::default()
         };
@@ -582,7 +582,7 @@ impl App {
                 }
             }
             
-            // Character input for command panel (only when not in dialog)
+            // Character input for command panel and special keys
             (_, KeyCode::Char(ch)) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
                     self.state.ui_state.command_input.input.push(ch);
@@ -605,12 +605,47 @@ impl App {
                                 // Enter search mode
                                 self.state.enter_search_mode();
                             }
+                            '1' => {
+                                self.state.set_view(ViewMode::ConnectionList);
+                            }
+                            '2' => {
+                                self.state.set_view(ViewMode::DatabaseBrowser);
+                            }
+                            '3' => {
+                                self.state.set_view(ViewMode::KeyViewer);
+                            }
+                            '4' => {
+                                self.state.set_view(ViewMode::CommandInterface);
+                            }
+                            '?' => {
+                                self.state.set_view(ViewMode::Help);
+                            }
                             _ => {}
                         }
                     }
                 } else if ch == 'c' {
                     // Handle 'c' for connection dialog in other panels
                     self.state.open_connection_dialog();
+                } else {
+                    // Handle view switching in other panels
+                    match ch {
+                        '1' => {
+                            self.state.set_view(ViewMode::ConnectionList);
+                        }
+                        '2' => {
+                            self.state.set_view(ViewMode::DatabaseBrowser);
+                        }
+                        '3' => {
+                            self.state.set_view(ViewMode::KeyViewer);
+                        }
+                        '4' => {
+                            self.state.set_view(ViewMode::CommandInterface);
+                        }
+                        '?' => {
+                            self.state.set_view(ViewMode::Help);
+                        }
+                        _ => {}
+                    }
                 }
             }
             
@@ -697,25 +732,6 @@ impl App {
                     && self.state.ui_state.database_browser.search_mode {
                     self.state.backspace_search();
                 }
-            }
-            
-            // View switching
-            (_, KeyCode::Char('1')) => {
-                self.state.set_view(ViewMode::ConnectionList);
-            }
-            (_, KeyCode::Char('2')) => {
-                self.state.set_view(ViewMode::DatabaseBrowser);
-            }
-            (_, KeyCode::Char('3')) => {
-                self.state.set_view(ViewMode::KeyViewer);
-            }
-            (_, KeyCode::Char('4')) => {
-                self.state.set_view(ViewMode::CommandInterface);
-            }
-            
-            // Help
-            (_, KeyCode::Char('?')) => {
-                self.state.set_view(ViewMode::Help);
             }
             
             // Clear status message on any other key

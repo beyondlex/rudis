@@ -518,58 +518,46 @@ impl AppState {
         let scan_cursor = self.ui_state.database_browser.scan_cursor;
         let keys_per_page = self.config.preferences.keys_per_page;
         
+        // Get connection ID for later reference
+        let connection_id = self.active_connection.clone();
+        
+        // Perform scan operation
         if let Some(connection) = self.get_active_connection_mut() {
             match connection.scan_keys(scan_cursor, &pattern, keys_per_page).await {
                 Ok((new_cursor, key_names)) => {
-                    // Load key information for the scanned keys
-                    match connection.get_keys_info(&key_names).await {
-                        Ok(key_infos_data) => {
-                            // Convert to KeyInfo structs with type and TTL information
-                            let mut key_infos = Vec::new();
-                            for (key_name, key_type, ttl) in key_infos_data {
-                                let key_info = KeyInfo {
-                                    name: key_name,
-                                    key_type,
-                                    ttl,
-                                    size: None, // Size will be loaded on demand
-                                    matches_filter: true,
-                                };
-                                key_infos.push(key_info);
-                            }
-                            
-                            // Append new keys to existing ones
-                            self.ui_state.database_browser.keys.extend(key_infos);
-                        }
-                        Err(_) => {
-                            // Fallback: create KeyInfo without type information
-                            let mut key_infos = Vec::new();
-                            for key_name in key_names {
-                                let key_info = KeyInfo {
-                                    name: key_name,
-                                    key_type: None,
-                                    ttl: None,
-                                    size: None,
-                                    matches_filter: true,
-                                };
-                                key_infos.push(key_info);
-                            }
-                            self.ui_state.database_browser.keys.extend(key_infos);
-                        }
-                    }
-                    
+                    // Update scan state
                     self.ui_state.database_browser.scan_cursor = new_cursor;
-                    
                     if new_cursor == 0 {
                         self.ui_state.database_browser.scan_complete = true;
+                    }
+                    
+                    if !key_names.is_empty() {
+                        // For now, create KeyInfo without type information
+                        // We'll add type detection as a separate operation
+                        let mut key_infos = Vec::new();
+                        for key_name in key_names {
+                            let key_info = KeyInfo {
+                                name: key_name,
+                                key_type: None, // Will be loaded separately
+                                ttl: None,      // Will be loaded separately
+                                size: None,
+                                matches_filter: true,
+                            };
+                            key_infos.push(key_info);
+                        }
+                        
+                        // Append new keys to existing ones
+                        self.ui_state.database_browser.keys.extend(key_infos);
+                        
                         self.set_status(format!(
-                            "Loaded {} keys (scan complete)", 
+                            "Loaded {} keys", 
                             self.ui_state.database_browser.keys.len()
                         ));
+                        
+                        // Load types and TTLs for the first few keys asynchronously
+                        self.load_key_details().await?;
                     } else {
-                        self.set_status(format!(
-                            "Loaded {} keys (more available)", 
-                            self.ui_state.database_browser.keys.len()
-                        ));
+                        self.set_status("No keys found".to_string());
                     }
                 }
                 Err(err) => {
@@ -579,6 +567,61 @@ impl AppState {
         }
         
         self.ui_state.database_browser.loading = false;
+        Ok(())
+    }
+    
+    /// Load type and TTL information for keys that don't have it yet
+    pub async fn load_key_details(&mut self) -> AppResult<()> {
+        // Load details for up to 10 keys at a time to avoid blocking UI
+        let mut keys_to_process = Vec::new();
+        let mut indices_to_update = Vec::new();
+        
+        for (idx, key_info) in self.ui_state.database_browser.keys.iter().enumerate() {
+            if key_info.key_type.is_none() && keys_to_process.len() < 10 {
+                keys_to_process.push(key_info.name.clone());
+                indices_to_update.push(idx);
+            }
+        }
+        
+        if keys_to_process.is_empty() {
+            return Ok(());
+        }
+        
+        // Load key information
+        if let Some(connection) = self.get_active_connection_mut() {
+            match connection.get_keys_info(&keys_to_process).await {
+                Ok(key_infos_data) => {
+                    let mut types_loaded = 0;
+                    let mut ttls_loaded = 0;
+                    
+                    // Update the key information
+                    for ((_, key_type, ttl), &idx) in key_infos_data.iter().zip(indices_to_update.iter()) {
+                        if let Some(key_info) = self.ui_state.database_browser.keys.get_mut(idx) {
+                            key_info.key_type = key_type.clone();
+                            key_info.ttl = *ttl;
+                            
+                            if key_type.is_some() {
+                                types_loaded += 1;
+                            }
+                            if ttl.is_some() {
+                                ttls_loaded += 1;
+                            }
+                        }
+                    }
+                    
+                    if types_loaded > 0 || ttls_loaded > 0 {
+                        self.set_status(format!(
+                            "Loaded details: {} types, {} TTLs", 
+                            types_loaded, ttls_loaded
+                        ));
+                    }
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to load key details: {}", err));
+                }
+            }
+        }
+        
         Ok(())
     }
     
@@ -594,7 +637,7 @@ impl AppState {
     pub fn select_next_key(&mut self) {
         let browser = &mut self.ui_state.database_browser;
         if !browser.keys.is_empty() {
-            let old_index = browser.selected_key_index;
+            let _old_index = browser.selected_key_index;
             browser.selected_key_index = (browser.selected_key_index + 1).min(browser.keys.len() - 1);
             
             // Adjust scroll offset if needed

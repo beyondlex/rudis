@@ -257,25 +257,65 @@ impl RedisConnection {
 
     /// Scan keys with pattern
     pub async fn scan_keys(&mut self, cursor: u64, pattern: &str, count: usize) -> AppResult<(u64, Vec<String>)> {
-        let args = vec![
-            cursor.to_string(),
-            "MATCH".to_string(),
-            pattern.to_string(),
-            "COUNT".to_string(),
-            count.to_string(),
-        ];
-        
-        let cmd_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let result = self.execute_command("SCAN", &cmd_args).await?;
-        
-        // Parse SCAN result (cursor, [keys])
-        let lines: Vec<&str> = result.lines().collect();
-        if lines.len() >= 2 {
-            let new_cursor = lines[0].parse().unwrap_or(0);
-            let keys: Vec<String> = lines[1..].iter().map(|s| s.to_string()).collect();
-            Ok((new_cursor, keys))
+        if !self.is_connected() {
+            return Err(AppError::Generic("Not connected to Redis".to_string()));
+        }
+
+        let mut conn_guard = self.connection.lock().await;
+        if let Some(ref mut conn) = *conn_guard {
+            let args = vec![
+                cursor.to_string(),
+                "MATCH".to_string(),
+                pattern.to_string(),
+                "COUNT".to_string(),
+                count.to_string(),
+            ];
+            
+            let mut redis_cmd = redis::cmd("SCAN");
+            for arg in &args {
+                redis_cmd.arg(arg);
+            }
+
+            match redis_cmd.query_async::<_, redis::Value>(conn).await {
+                Ok(redis::Value::Bulk(mut values)) if values.len() == 2 => {
+                    // Extract cursor
+                    let new_cursor = match values.remove(0) {
+                        redis::Value::Data(bytes) => {
+                            String::from_utf8(bytes).unwrap_or_default().parse().unwrap_or(0)
+                        }
+                        redis::Value::Int(i) => i as u64,
+                        _ => 0,
+                    };
+                    
+                    // Extract keys
+                    let keys = match values.remove(0) {
+                        redis::Value::Bulk(key_values) => {
+                            key_values.into_iter().filter_map(|v| match v {
+                                redis::Value::Data(bytes) => String::from_utf8(bytes).ok(),
+                                _ => None,
+                            }).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    
+                    self.stats.commands_executed += 1;
+                    Ok((new_cursor, keys))
+                }
+                Ok(_) => {
+                    self.stats.commands_executed += 1;
+                    Ok((0, Vec::new()))
+                }
+                Err(err) => {
+                    self.stats.commands_failed += 1;
+                    if err.is_connection_dropped() {
+                        self.status = ConnectionStatus::Lost;
+                    }
+                    Err(AppError::Redis(err))
+                }
+            }
         } else {
-            Ok((0, Vec::new()))
+            self.status = ConnectionStatus::Lost;
+            Err(AppError::Generic("Connection lost".to_string()))
         }
     }
     
@@ -302,15 +342,56 @@ impl RedisConnection {
     
     /// Get key type
     pub async fn get_key_type(&mut self, key: &str) -> AppResult<String> {
-        self.execute_command("TYPE", &[key]).await
+        if !self.is_connected() {
+            return Err(AppError::Generic("Not connected to Redis".to_string()));
+        }
+
+        let mut conn_guard = self.connection.lock().await;
+        if let Some(ref mut conn) = *conn_guard {
+            match redis::cmd("TYPE").arg(key).query_async::<_, String>(conn).await {
+                Ok(result) => {
+                    self.stats.commands_executed += 1;
+                    Ok(result)
+                }
+                Err(err) => {
+                    self.stats.commands_failed += 1;
+                    if err.is_connection_dropped() {
+                        self.status = ConnectionStatus::Lost;
+                    }
+                    Err(AppError::Redis(err))
+                }
+            }
+        } else {
+            self.status = ConnectionStatus::Lost;
+            Err(AppError::Generic("Connection lost".to_string()))
+        }
     }
     
     /// Get key TTL
     pub async fn get_key_ttl(&mut self, key: &str) -> AppResult<i64> {
-        let result = self.execute_command("TTL", &[key]).await?;
-        result.trim().parse().map_err(|_| {
-            AppError::Generic("Failed to parse TTL".to_string())
-        })
+        if !self.is_connected() {
+            return Err(AppError::Generic("Not connected to Redis".to_string()));
+        }
+
+        let mut conn_guard = self.connection.lock().await;
+        if let Some(ref mut conn) = *conn_guard {
+            match redis::cmd("TTL").arg(key).query_async::<_, i64>(conn).await {
+                Ok(result) => {
+                    self.stats.commands_executed += 1;
+                    Ok(result)
+                }
+                Err(err) => {
+                    self.stats.commands_failed += 1;
+                    if err.is_connection_dropped() {
+                        self.status = ConnectionStatus::Lost;
+                    }
+                    Err(AppError::Redis(err))
+                }
+            }
+        } else {
+            self.status = ConnectionStatus::Lost;
+            Err(AppError::Generic("Connection lost".to_string()))
+        }
     }
     
     /// Delete a key
@@ -345,13 +426,27 @@ impl RedisConnection {
         
         for key in keys {
             let key_type = match self.get_key_type(key).await {
-                Ok(t) if t.trim() != "none" => Some(t.trim().to_string()),
-                _ => None,
+                Ok(t) => {
+                    let t = t.trim();
+                    if t == "none" {
+                        None // Key doesn't exist
+                    } else {
+                        Some(t.to_string())
+                    }
+                }
+                Err(_) => None,
             };
             
             let ttl = match self.get_key_ttl(key).await {
-                Ok(t) if t >= 0 => Some(t),
-                _ => None, // -1 means no expiry, -2 means key doesn't exist
+                Ok(t) => {
+                    match t {
+                        -2 => None, // Key doesn't exist
+                        -1 => Some(-1), // No expiry
+                        ttl if ttl > 0 => Some(ttl), // Has expiry
+                        _ => None,
+                    }
+                }
+                Err(_) => None,
             };
             
             results.push((key.clone(), key_type, ttl));
