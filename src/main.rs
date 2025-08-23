@@ -141,11 +141,28 @@ impl App {
             .split(main_layout[1]);
         
         // Render connections panel
-        let connections_title = "Connections (0)";
+        let connections_count = self.state.connections.len();
+        let connections_title = format!("Connections ({})", connections_count);
+        
         let connections_content = if self.state.connections.is_empty() {
-            "No connections\n\nPress 'c' to add\na new connection"
+            "No connections\n\nPress 'c' to add\na new connection".to_string()
         } else {
-            "• localhost:6379\n  Status: Disconnected"
+            // List existing connections
+            let mut content = String::new();
+            for (id, connection) in &self.state.connections {
+                let status_icon = match connection.status {
+                    crate::redis::ConnectionStatus::Connected => "●",
+                    crate::redis::ConnectionStatus::Connecting => "◐",
+                    crate::redis::ConnectionStatus::Disconnected => "○",
+                    crate::redis::ConnectionStatus::Failed(_) => "✗",
+                    crate::redis::ConnectionStatus::Lost => "⚠",
+                };
+                let is_active = self.state.active_connection.as_ref() == Some(id);
+                let marker = if is_active { "> " } else { "  " };
+                content.push_str(&format!("{}{} {}\n", marker, status_icon, connection.config.name));
+            }
+            content.push_str("\nPress 'c' to add connection");
+            content
         };
         
         frame.render_widget(
@@ -157,7 +174,11 @@ impl App {
         
         // Render database browser panel
         let db_title = "Database Browser";
-        let db_content = "Select a connection\nto browse databases";
+        let db_content = if self.state.active_connection.is_some() {
+            "Database: 0\n\nPress 'Enter' to\nbrowse keys"
+        } else {
+            "Select a connection\nto browse databases"
+        };
         
         frame.render_widget(
             Paragraph::new(db_content)
@@ -193,6 +214,125 @@ impl App {
                 .block(Block::bordered())
                 .style(Style::default().bg(Color::DarkGray)),
             main_layout[2],
+        );
+        
+        // Render connection dialog if open
+        if self.state.ui_state.connection_dialog.is_open {
+            self.render_connection_dialog(frame, area);
+        }
+    }
+
+    /// Render the connection creation dialog
+    fn render_connection_dialog(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use ratatui::layout::{Constraint, Direction, Layout, Alignment};
+        use ratatui::style::{Color, Style, Modifier};
+        use ratatui::widgets::{Clear, Borders};
+        
+        // Calculate dialog size and position (centered)
+        let dialog_width = 60;
+        let dialog_height = 16;
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+        let dialog_area = ratatui::layout::Rect {
+            x,
+            y,
+            width: dialog_width,
+            height: dialog_height,
+        };
+        
+        // Clear the background
+        frame.render_widget(Clear, dialog_area);
+        
+        // Create dialog layout
+        let dialog_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),  // Title
+                Constraint::Length(11), // Form fields
+                Constraint::Length(2),  // Buttons
+            ])
+            .split(dialog_area);
+        
+        // Render dialog title
+        let title = Line::from("New Redis Connection")
+            .bold()
+            .white()
+            .centered();
+        frame.render_widget(
+            Paragraph::new("")
+                .block(Block::bordered().title(title))
+                .style(Style::default().bg(Color::Blue)),
+            dialog_layout[0],
+        );
+        
+        // Create form layout
+        let form_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // Name
+                Constraint::Length(2), // Host
+                Constraint::Length(2), // Port
+                Constraint::Length(2), // Password
+                Constraint::Length(2), // Database
+                Constraint::Length(1), // Spacer
+            ])
+            .split(dialog_layout[1]);
+        
+        let form = &self.state.ui_state.connection_dialog.form;
+        let focused_field = &self.state.ui_state.connection_dialog.focused_field;
+        
+        // Helper function to create field style
+        let field_style = |is_focused: bool| {
+            if is_focused {
+                Style::default().bg(Color::Yellow).fg(Color::Black)
+            } else {
+                Style::default().bg(Color::Gray).fg(Color::White)
+            }
+        };
+        
+        // Render form fields
+        frame.render_widget(
+            Paragraph::new(format!("Name: {}", form.name))
+                .style(field_style(matches!(focused_field, crate::app::ConnectionDialogField::Name))),
+            form_layout[0],
+        );
+        
+        frame.render_widget(
+            Paragraph::new(format!("Host: {}", form.host))
+                .style(field_style(matches!(focused_field, crate::app::ConnectionDialogField::Host))),
+            form_layout[1],
+        );
+        
+        frame.render_widget(
+            Paragraph::new(format!("Port: {}", form.port))
+                .style(field_style(matches!(focused_field, crate::app::ConnectionDialogField::Port))),
+            form_layout[2],
+        );
+        
+        frame.render_widget(
+            Paragraph::new(format!("Password: {}", "*".repeat(form.password.len())))
+                .style(field_style(matches!(focused_field, crate::app::ConnectionDialogField::Password))),
+            form_layout[3],
+        );
+        
+        frame.render_widget(
+            Paragraph::new(format!("Database: {}", form.database))
+                .style(field_style(matches!(focused_field, crate::app::ConnectionDialogField::Database))),
+            form_layout[4],
+        );
+        
+        // Render buttons
+        let button_text = if matches!(focused_field, crate::app::ConnectionDialogField::Buttons) {
+            "[Save] [Cancel] - Enter:Select Tab:Navigate Esc:Cancel"
+        } else {
+            "Tab:Navigate Enter:Save Esc:Cancel"
+        };
+        
+        frame.render_widget(
+            Paragraph::new(button_text)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Cyan)),
+            dialog_layout[2],
         );
     }
 
@@ -234,6 +374,11 @@ impl App {
 
     /// Handles the key events and updates the state of [`App`].
     async fn on_key_event(&mut self, key: KeyEvent) -> AppResult<()> {
+        // Handle connection dialog events first
+        if self.state.ui_state.connection_dialog.is_open {
+            return self.handle_dialog_key_event(key).await;
+        }
+        
         match (key.modifiers, key.code) {
             // Quit application
             (_, KeyCode::Esc | KeyCode::Char('q'))
@@ -251,7 +396,7 @@ impl App {
             
             // Connection management
             (_, KeyCode::Char('c')) => {
-                self.state.set_status("Connection setup not yet implemented".to_string());
+                self.state.open_connection_dialog();
             }
             
             // View switching
@@ -277,6 +422,62 @@ impl App {
             _ => {
                 self.state.clear_status();
             }
+        }
+        Ok(())
+    }
+
+    /// Handle key events when connection dialog is open
+    async fn handle_dialog_key_event(&mut self, key: KeyEvent) -> AppResult<()> {
+        match (key.modifiers, key.code) {
+            // Close dialog
+            (_, KeyCode::Esc) => {
+                self.state.close_connection_dialog();
+            }
+            
+            // Navigate fields
+            (_, KeyCode::Tab) => {
+                self.state.next_dialog_field();
+            }
+            (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+                self.state.previous_dialog_field();
+            }
+            
+            // Save connection
+            (_, KeyCode::Enter) => {
+                if matches!(self.state.ui_state.connection_dialog.focused_field, crate::app::ConnectionDialogField::Buttons) {
+                    // On buttons, Enter means Save
+                    match self.state.create_connection_from_dialog().await {
+                        Ok(()) => {
+                            // Connection created successfully
+                        }
+                        Err(err) => {
+                            self.state.set_status(format!("Connection failed: {}", err));
+                        }
+                    }
+                } else {
+                    // On form fields, Enter means save
+                    match self.state.create_connection_from_dialog().await {
+                        Ok(()) => {
+                            // Connection created successfully
+                        }
+                        Err(err) => {
+                            self.state.set_status(format!("Connection failed: {}", err));
+                        }
+                    }
+                }
+            }
+            
+            // Backspace
+            (_, KeyCode::Backspace) => {
+                self.state.backspace_dialog_field();
+            }
+            
+            // Character input
+            (_, KeyCode::Char(ch)) => {
+                self.state.update_dialog_field(ch);
+            }
+            
+            _ => {}
         }
         Ok(())
     }
