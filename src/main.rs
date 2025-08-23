@@ -189,11 +189,90 @@ impl App {
         );
         
         // Render database browser panel
-        let db_title = "Database Browser";
-        let db_content = if self.state.active_connection.is_some() {
-            "Database: 0\n\nPress 'Enter' to\nbrowse keys"
+        let browser_state = &self.state.ui_state.database_browser;
+        let db_title = if self.state.active_connection.is_some() {
+            if browser_state.search_mode {
+                format!("Database {} - Search: {}_", 
+                    browser_state.selected_database,
+                    browser_state.filter_pattern)
+            } else if !browser_state.filter_pattern.is_empty() {
+                format!("Database {} - Filtered: {} ({} keys)", 
+                    browser_state.selected_database,
+                    browser_state.filter_pattern,
+                    browser_state.keys.len())
+            } else {
+                format!("Database {} ({} keys)", 
+                    browser_state.selected_database,
+                    browser_state.keys.len())
+            }
         } else {
-            "Select a connection\nto browse databases"
+            "Database Browser".to_string()
+        };
+        
+        let db_content = if self.state.active_connection.is_some() {
+            if browser_state.search_mode {
+                // In search mode, show search instructions
+                format!("Search Mode\n\nPattern: {}\n\nType to search, Enter to apply\nEsc to cancel search", 
+                    if browser_state.filter_pattern.is_empty() { 
+                        "<type pattern>"
+                    } else { 
+                        &browser_state.filter_pattern 
+                    })
+            } else if browser_state.keys.is_empty() {
+                if browser_state.loading {
+                    "Loading keys...".to_string()
+                } else {
+                    "No keys found\n\nPress 'r' to refresh\nPress '/' to search".to_string()
+                }
+            } else {
+                // Show list of keys
+                let mut content = String::new();
+                let visible_keys = browser_state.keys.iter()
+                    .skip(browser_state.scroll_offset)
+                    .take(10); // Show up to 10 keys at once
+                
+                for (i, key_info) in visible_keys.enumerate() {
+                    let actual_index = browser_state.scroll_offset + i;
+                    let is_selected = actual_index == browser_state.selected_key_index;
+                    let marker = if is_selected { "> " } else { "  " };
+                    
+                    // Key type icon
+                    let type_icon = match key_info.key_type.as_deref() {
+                        Some("string") => "🔤", // 🔤
+                        Some("hash") => "📋", // 📋
+                        Some("list") => "📜", // 📜
+                        Some("set") => "📊", // 📊
+                        Some("zset") => "📊", // 📊
+                        Some("stream") => "🌊", // 🌊
+                        _ => "●", // ● (unknown)
+                    };
+                    
+                    // Add TTL info if available
+                    let ttl_info = match key_info.ttl {
+                        Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
+                        Some(-1) => " (no exp)".to_string(),
+                        _ => String::new(),
+                    };
+                    
+                    // Truncate long key names
+                    let display_name = if key_info.name.len() > 20 {
+                        format!("{}...", &key_info.name[..17])
+                    } else {
+                        key_info.name.clone()
+                    };
+                    
+                    content.push_str(&format!("{}{} {}{}\n", marker, type_icon, display_name, ttl_info));
+                }
+                
+                if !browser_state.scan_complete {
+                    content.push_str("\n[More keys available - scroll down]");
+                }
+                
+                content.push_str(&format!("\nr:Refresh /:Search del:Delete"));
+                content
+            }
+        } else {
+            "Select a connection\nto browse databases".to_string()
         };
         
         // Style based on focus
@@ -440,7 +519,11 @@ impl App {
             AppEvent::KeyPressed(key) => self.on_key_event(key).await?,
             AppEvent::ConnectionStatusChanged { connection_id, status } => {
                 if let Some(connection) = self.state.connections.get_mut(&connection_id) {
-                    connection.status = status;
+                    connection.status = status.clone();
+                    // If connection is now established, initialize database browser
+                    if matches!(status, crate::redis::ConnectionStatus::Connected) {
+                        self.initialize_database_browser().await?;
+                    }
                 }
             }
             AppEvent::StatusMessage(msg) => {
@@ -465,9 +548,18 @@ impl App {
         }
         
         match (key.modifiers, key.code) {
-            // Quit application
-            (_, KeyCode::Esc | KeyCode::Char('q'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
+            // Quit application or exit search mode
+            (_, KeyCode::Esc | KeyCode::Char('q'))  => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser)
+                    && self.state.ui_state.database_browser.search_mode {
+                    // Exit search mode
+                    self.state.exit_search_mode();
+                } else {
+                    // Quit application
+                    self.state.quit();
+                }
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                 self.state.quit();
             }
             
@@ -479,10 +571,14 @@ impl App {
                 self.state.previous_panel();
             }
             
-            // Command execution
+            // Command execution and search application
             (_, KeyCode::Enter) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
                     self.execute_command().await?;
+                } else if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser)
+                    && self.state.ui_state.database_browser.search_mode {
+                    // Apply search filter
+                    self.state.apply_search_filter().await?;
                 }
             }
             
@@ -490,16 +586,116 @@ impl App {
             (_, KeyCode::Char(ch)) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
                     self.state.ui_state.command_input.input.push(ch);
+                } else if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    if self.state.ui_state.database_browser.search_mode {
+                        // In search mode, add character to search pattern
+                        self.state.add_search_char(ch);
+                    } else {
+                        // Handle special keys for database browser
+                        match ch {
+                            'c' => {
+                                // Handle 'c' for connection dialog if not in command input mode
+                                self.state.open_connection_dialog();
+                            }
+                            'r' => {
+                                // Refresh keys in database browser
+                                self.refresh_keys().await?;
+                            }
+                            '/' => {
+                                // Enter search mode
+                                self.state.enter_search_mode();
+                            }
+                            _ => {}
+                        }
+                    }
                 } else if ch == 'c' {
-                    // Handle 'c' for connection dialog if not in command input mode
+                    // Handle 'c' for connection dialog in other panels
                     self.state.open_connection_dialog();
                 }
             }
             
-            // Backspace for command panel
+            // Arrow key navigation
+            (_, KeyCode::Down) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    self.state.select_next_key();
+                    // Load more keys if near the end
+                    let browser = &self.state.ui_state.database_browser;
+                    if browser.selected_key_index >= browser.keys.len().saturating_sub(3) {
+                        self.state.load_more_keys().await?;
+                    }
+                }
+            }
+            (_, KeyCode::Up) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    self.state.select_previous_key();
+                }
+            }
+            
+            // Page navigation in database browser
+            (_, KeyCode::PageUp) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    // Move up by 5 keys
+                    for _ in 0..5 {
+                        self.state.select_previous_key();
+                    }
+                }
+            }
+            (_, KeyCode::PageDown) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    // Move down by 5 keys or load more keys if needed
+                    for _ in 0..5 {
+                        self.state.select_next_key();
+                    }
+                    // Try to load more keys if we're near the end
+                    if !self.state.ui_state.database_browser.scan_complete {
+                        let _ = self.state.load_more_keys().await;
+                    }
+                }
+            }
+            
+            // Home and End navigation
+            (_, KeyCode::Home) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    self.state.ui_state.database_browser.selected_key_index = 0;
+                    self.state.ui_state.database_browser.scroll_offset = 0;
+                    // Update selected key
+                    if let Some(key_info) = self.state.ui_state.database_browser.keys.first() {
+                        self.state.selected_key = Some(key_info.name.clone());
+                    }
+                }
+            }
+            (_, KeyCode::End) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    let keys_len = self.state.ui_state.database_browser.keys.len();
+                    if keys_len > 0 {
+                        self.state.ui_state.database_browser.selected_key_index = keys_len - 1;
+                        // Adjust scroll offset to show the last key
+                        let visible_count = 10;
+                        if keys_len > visible_count {
+                            self.state.ui_state.database_browser.scroll_offset = keys_len - visible_count;
+                        }
+                        // Update selected key
+                        if let Some(key_info) = self.state.ui_state.database_browser.keys.last() {
+                            self.state.selected_key = Some(key_info.name.clone());
+                        }
+                    }
+                }
+            }
+            
+            // Delete key functionality
+            (_, KeyCode::Delete) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser) {
+                    self.delete_selected_key().await?;
+                }
+            }
+            
+            // Backspace for command panel and search mode
             (_, KeyCode::Backspace) => {
                 if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
                     self.state.ui_state.command_input.input.pop();
+                } else if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser)
+                    && self.state.ui_state.database_browser.search_mode {
+                    self.state.backspace_search();
                 }
             }
             
@@ -656,6 +852,68 @@ impl App {
         self.state.ui_state.command_input.history.push(command_text);
         self.state.ui_state.command_input.input.clear();
         
+        Ok(())
+    }
+    
+    /// Refresh keys in the current database
+    async fn refresh_keys(&mut self) -> AppResult<()> {
+        // Reset scanning state
+        self.state.ui_state.database_browser.keys.clear();
+        self.state.ui_state.database_browser.scan_cursor = 0;
+        self.state.ui_state.database_browser.scan_complete = false;
+        self.state.ui_state.database_browser.selected_key_index = 0;
+        
+        // Load keys
+        self.state.load_keys().await?;
+        Ok(())
+    }
+    
+    /// Initialize database browser for active connection
+    async fn initialize_database_browser(&mut self) -> AppResult<()> {
+        if self.state.active_connection.is_some() {
+            // Load available databases
+            self.state.load_databases().await?;
+            
+            // Select database 0 by default
+            self.state.select_database(0).await?;
+        }
+        Ok(())
+    }
+    
+    /// Delete the currently selected key
+    async fn delete_selected_key(&mut self) -> AppResult<()> {
+        if let Some(key_info) = self.state.get_selected_key_info() {
+            let key_name = key_info.name.clone();
+            
+            if let Some(connection) = self.state.get_active_connection_mut() {
+                match connection.delete_key(&key_name).await {
+                    Ok(_) => {
+                        // Remove key from local list
+                        let browser = &mut self.state.ui_state.database_browser;
+                        browser.keys.remove(browser.selected_key_index);
+                        
+                        // Adjust selection index if needed
+                        if browser.selected_key_index >= browser.keys.len() && browser.selected_key_index > 0 {
+                            browser.selected_key_index -= 1;
+                        }
+                        
+                        // Update selected key
+                        if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                            self.state.selected_key = Some(key_info.name.clone());
+                        } else {
+                            self.state.selected_key = None;
+                        }
+                        
+                        self.state.set_status(format!("Deleted key: {}", key_name));
+                    }
+                    Err(err) => {
+                        self.state.set_status(format!("Failed to delete key {}: {}", key_name, err));
+                    }
+                }
+            }
+        } else {
+            self.state.set_status("No key selected".to_string());
+        }
         Ok(())
     }
 }

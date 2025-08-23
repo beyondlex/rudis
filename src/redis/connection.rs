@@ -25,7 +25,7 @@ pub struct RedisConnection {
     pub config: ConnectionConfig,
     
     /// Redis client instance
-    pub client: Client,
+    pub client: redis::Client,
     
     /// Current connection status
     pub status: ConnectionStatus,
@@ -75,7 +75,7 @@ impl RedisConnection {
     /// Create a new Redis connection
     pub fn new(config: ConnectionConfig) -> AppResult<Self> {
         let connection_url = Self::build_connection_url(&config)?;
-        let client = Client::open(connection_url)
+        let client = redis::Client::open(connection_url)
             .map_err(AppError::Redis)?;
 
         Ok(Self {
@@ -276,6 +276,100 @@ impl RedisConnection {
             Ok((new_cursor, keys))
         } else {
             Ok((0, Vec::new()))
+        }
+    }
+    
+    /// Get list of available databases
+    pub async fn get_databases(&mut self) -> AppResult<Vec<u8>> {
+        // Get CONFIG GET databases to find max databases
+        match self.execute_command("CONFIG", &["GET", "databases"]).await {
+            Ok(result) => {
+                // Parse the result to get database count
+                let lines: Vec<&str> = result.lines().collect();
+                let db_count = if lines.len() >= 2 {
+                    lines[1].parse().unwrap_or(16)
+                } else {
+                    16
+                };
+                Ok((0..db_count).collect())
+            }
+            Err(_) => {
+                // Fallback: assume standard 16 databases
+                Ok((0..16).collect())
+            }
+        }
+    }
+    
+    /// Get key type
+    pub async fn get_key_type(&mut self, key: &str) -> AppResult<String> {
+        self.execute_command("TYPE", &[key]).await
+    }
+    
+    /// Get key TTL
+    pub async fn get_key_ttl(&mut self, key: &str) -> AppResult<i64> {
+        let result = self.execute_command("TTL", &[key]).await?;
+        result.trim().parse().map_err(|_| {
+            AppError::Generic("Failed to parse TTL".to_string())
+        })
+    }
+    
+    /// Delete a key
+    pub async fn delete_key(&mut self, key: &str) -> AppResult<String> {
+        self.execute_command("DEL", &[key]).await
+    }
+    
+    /// Rename a key
+    pub async fn rename_key(&mut self, old_key: &str, new_key: &str) -> AppResult<String> {
+        self.execute_command("RENAME", &[old_key, new_key]).await
+    }
+    
+    /// Set key expiration
+    pub async fn expire_key(&mut self, key: &str, seconds: u64) -> AppResult<String> {
+        self.execute_command("EXPIRE", &[key, &seconds.to_string()]).await
+    }
+    
+    /// Get key value (for string keys)
+    pub async fn get_string_value(&mut self, key: &str) -> AppResult<String> {
+        self.execute_command("GET", &[key]).await
+    }
+    
+    /// Check if key exists
+    pub async fn key_exists(&mut self, key: &str) -> AppResult<bool> {
+        let result = self.execute_command("EXISTS", &[key]).await?;
+        Ok(result.trim() == "1")
+    }
+    
+    /// Get key information (type, TTL, size) for multiple keys efficiently
+    pub async fn get_keys_info(&mut self, keys: &[String]) -> AppResult<Vec<(String, Option<String>, Option<i64>)>> {
+        let mut results = Vec::new();
+        
+        for key in keys {
+            let key_type = match self.get_key_type(key).await {
+                Ok(t) if t.trim() != "none" => Some(t.trim().to_string()),
+                _ => None,
+            };
+            
+            let ttl = match self.get_key_ttl(key).await {
+                Ok(t) if t >= 0 => Some(t),
+                _ => None, // -1 means no expiry, -2 means key doesn't exist
+            };
+            
+            results.push((key.clone(), key_type, ttl));
+        }
+        
+        Ok(results)
+    }
+    
+    /// Get memory usage of a key (Redis 4.0+)
+    pub async fn get_key_memory_usage(&mut self, key: &str) -> AppResult<Option<usize>> {
+        match self.execute_command("MEMORY", &["USAGE", key]).await {
+            Ok(result) => {
+                match result.trim().parse::<usize>() {
+                    Ok(size) => Ok(Some(size)),
+                    Err(_) => Ok(None),
+                }
+            }
+            Err(_) => Ok(None), // Command might not be available in older Redis versions
         }
     }
 }

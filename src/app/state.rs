@@ -103,18 +103,43 @@ pub struct ConnectionListState {
 /// State for database browser panel
 #[derive(Debug, Default)]
 pub struct DatabaseBrowserState {
+    /// Available databases
+    pub databases: Vec<u8>,
+    /// Currently selected database
+    pub selected_database: u8,
     /// Currently selected key index
-    pub selected_index: usize,
+    pub selected_key_index: usize,
     /// Scroll offset for the key list
     pub scroll_offset: usize,
     /// Current search/filter pattern
     pub filter_pattern: String,
+    /// Whether we're in search mode
+    pub search_mode: bool,
     /// Cached keys for current database
-    pub keys: Vec<String>,
+    pub keys: Vec<KeyInfo>,
     /// Key scan cursor for pagination
     pub scan_cursor: u64,
     /// Whether we're currently loading keys
     pub loading: bool,
+    /// Whether we've loaded all keys (scan cursor = 0)
+    pub scan_complete: bool,
+    /// Total key count for current database
+    pub total_keys: Option<usize>,
+}
+
+/// Information about a Redis key
+#[derive(Debug, Clone)]
+pub struct KeyInfo {
+    /// Key name
+    pub name: String,
+    /// Key type (string, hash, list, set, zset, stream)
+    pub key_type: Option<String>,
+    /// TTL in seconds (-1 for no expiry, -2 for key doesn't exist)
+    pub ttl: Option<i64>,
+    /// Key size/length
+    pub size: Option<usize>,
+    /// Whether this key matches current filter
+    pub matches_filter: bool,
 }
 
 /// State for key viewer panel
@@ -411,12 +436,14 @@ impl AppState {
         
         // Generate unique ID for connection
         let connection_id = uuid::Uuid::new_v4().to_string();
+        let connection_id_for_config = connection_id.clone();
+        let connection_id_for_event = connection_id.clone();
         
         // Add to connections
-        self.add_connection(connection_id.clone(), redis_connection);
+        self.add_connection(connection_id, redis_connection);
         
         // Add to config
-        self.config.add_connection(connection_id, connection_config);
+        self.config.add_connection(connection_id_for_config, connection_config);
         
         // Close dialog
         self.close_connection_dialog();
@@ -424,6 +451,247 @@ impl AppState {
         // Set status message
         self.set_status(format!("Connected to {}", form.name));
         
+        // Trigger database browser initialization
+        let _ = self.event_tx.send(crate::events::AppEvent::ConnectionStatusChanged {
+            connection_id: connection_id_for_event,
+            status: crate::redis::ConnectionStatus::Connected,
+        });
+        
+        Ok(())
+    }
+    
+    /// Load available databases for active connection
+    pub async fn load_databases(&mut self) -> AppResult<()> {
+        if let Some(connection) = self.get_active_connection_mut() {
+            match connection.get_databases().await {
+                Ok(databases) => {
+                    self.ui_state.database_browser.databases = databases;
+                    self.set_status(format!("Found {} databases", self.ui_state.database_browser.databases.len()));
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to load databases: {}", err));
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    /// Select a database
+    pub async fn select_database(&mut self, db_num: u8) -> AppResult<()> {
+        if let Some(connection) = self.get_active_connection_mut() {
+            match connection.select_database(db_num).await {
+                Ok(()) => {
+                    self.ui_state.database_browser.selected_database = db_num;
+                    self.selected_database = Some(db_num);
+                    // Clear current keys and reset scanning
+                    self.ui_state.database_browser.keys.clear();
+                    self.ui_state.database_browser.scan_cursor = 0;
+                    self.ui_state.database_browser.scan_complete = false;
+                    self.ui_state.database_browser.selected_key_index = 0;
+                    // Load keys for the new database
+                    self.load_keys().await?;
+                    self.set_status(format!("Selected database {}", db_num));
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to select database {}: {}", db_num, err));
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    /// Load keys from current database
+    pub async fn load_keys(&mut self) -> AppResult<()> {
+        if self.ui_state.database_browser.loading {
+            return Ok(()); // Already loading
+        }
+        
+        self.ui_state.database_browser.loading = true;
+        
+        // Extract values to avoid borrowing conflicts
+        let pattern = if self.ui_state.database_browser.filter_pattern.is_empty() {
+            "*".to_string()
+        } else {
+            format!("*{}*", self.ui_state.database_browser.filter_pattern)
+        };
+        
+        let scan_cursor = self.ui_state.database_browser.scan_cursor;
+        let keys_per_page = self.config.preferences.keys_per_page;
+        
+        if let Some(connection) = self.get_active_connection_mut() {
+            match connection.scan_keys(scan_cursor, &pattern, keys_per_page).await {
+                Ok((new_cursor, key_names)) => {
+                    // Load key information for the scanned keys
+                    match connection.get_keys_info(&key_names).await {
+                        Ok(key_infos_data) => {
+                            // Convert to KeyInfo structs with type and TTL information
+                            let mut key_infos = Vec::new();
+                            for (key_name, key_type, ttl) in key_infos_data {
+                                let key_info = KeyInfo {
+                                    name: key_name,
+                                    key_type,
+                                    ttl,
+                                    size: None, // Size will be loaded on demand
+                                    matches_filter: true,
+                                };
+                                key_infos.push(key_info);
+                            }
+                            
+                            // Append new keys to existing ones
+                            self.ui_state.database_browser.keys.extend(key_infos);
+                        }
+                        Err(_) => {
+                            // Fallback: create KeyInfo without type information
+                            let mut key_infos = Vec::new();
+                            for key_name in key_names {
+                                let key_info = KeyInfo {
+                                    name: key_name,
+                                    key_type: None,
+                                    ttl: None,
+                                    size: None,
+                                    matches_filter: true,
+                                };
+                                key_infos.push(key_info);
+                            }
+                            self.ui_state.database_browser.keys.extend(key_infos);
+                        }
+                    }
+                    
+                    self.ui_state.database_browser.scan_cursor = new_cursor;
+                    
+                    if new_cursor == 0 {
+                        self.ui_state.database_browser.scan_complete = true;
+                        self.set_status(format!(
+                            "Loaded {} keys (scan complete)", 
+                            self.ui_state.database_browser.keys.len()
+                        ));
+                    } else {
+                        self.set_status(format!(
+                            "Loaded {} keys (more available)", 
+                            self.ui_state.database_browser.keys.len()
+                        ));
+                    }
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to scan keys: {}", err));
+                }
+            }
+        }
+        
+        self.ui_state.database_browser.loading = false;
+        Ok(())
+    }
+    
+    /// Load more keys (pagination)
+    pub async fn load_more_keys(&mut self) -> AppResult<()> {
+        if !self.ui_state.database_browser.scan_complete {
+            self.load_keys().await?
+        }
+        Ok(())
+    }
+    
+    /// Select next key in the browser
+    pub fn select_next_key(&mut self) {
+        let browser = &mut self.ui_state.database_browser;
+        if !browser.keys.is_empty() {
+            let old_index = browser.selected_key_index;
+            browser.selected_key_index = (browser.selected_key_index + 1).min(browser.keys.len() - 1);
+            
+            // Adjust scroll offset if needed
+            let visible_count = 10; // Number of keys visible at once
+            if browser.selected_key_index >= browser.scroll_offset + visible_count {
+                browser.scroll_offset = browser.selected_key_index - visible_count + 1;
+            }
+            
+            // Update selected key
+            if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                self.selected_key = Some(key_info.name.clone());
+            }
+        }
+    }
+    
+    /// Select previous key in the browser
+    pub fn select_previous_key(&mut self) {
+        let browser = &mut self.ui_state.database_browser;
+        if browser.selected_key_index > 0 {
+            browser.selected_key_index -= 1;
+            
+            // Adjust scroll offset if needed
+            if browser.selected_key_index < browser.scroll_offset {
+                browser.scroll_offset = browser.selected_key_index;
+            }
+            
+            // Update selected key
+            if let Some(key_info) = browser.keys.get(browser.selected_key_index) {
+                self.selected_key = Some(key_info.name.clone());
+            }
+        }
+    }
+    
+    /// Set filter pattern for key search
+    pub async fn set_key_filter(&mut self, pattern: String) -> AppResult<()> {
+        self.ui_state.database_browser.filter_pattern = pattern;
+        // Reset scanning and reload keys with new filter
+        self.ui_state.database_browser.keys.clear();
+        self.ui_state.database_browser.scan_cursor = 0;
+        self.ui_state.database_browser.scan_complete = false;
+        self.ui_state.database_browser.selected_key_index = 0;
+        self.load_keys().await
+    }
+    
+    /// Get currently selected key info
+    pub fn get_selected_key_info(&self) -> Option<&KeyInfo> {
+        let browser = &self.ui_state.database_browser;
+        browser.keys.get(browser.selected_key_index)
+    }
+    
+    /// Enter search mode for key filtering
+    pub fn enter_search_mode(&mut self) {
+        self.ui_state.database_browser.search_mode = true;
+        self.ui_state.database_browser.filter_pattern.clear();
+    }
+    
+    /// Exit search mode
+    pub fn exit_search_mode(&mut self) {
+        self.ui_state.database_browser.search_mode = false;
+        if !self.ui_state.database_browser.filter_pattern.is_empty() {
+            // Clear filter and reload all keys
+            self.ui_state.database_browser.filter_pattern.clear();
+            // Reset scanning state
+            self.ui_state.database_browser.keys.clear();
+            self.ui_state.database_browser.scan_cursor = 0;
+            self.ui_state.database_browser.scan_complete = false;
+            self.ui_state.database_browser.selected_key_index = 0;
+        }
+    }
+    
+    /// Add character to search pattern
+    pub fn add_search_char(&mut self, ch: char) {
+        if self.ui_state.database_browser.search_mode {
+            self.ui_state.database_browser.filter_pattern.push(ch);
+        }
+    }
+    
+    /// Remove last character from search pattern
+    pub fn backspace_search(&mut self) {
+        if self.ui_state.database_browser.search_mode {
+            self.ui_state.database_browser.filter_pattern.pop();
+        }
+    }
+    
+    /// Apply current search filter
+    pub async fn apply_search_filter(&mut self) -> AppResult<()> {
+        if self.ui_state.database_browser.search_mode {
+            // Reset scanning state and search with new pattern
+            self.ui_state.database_browser.keys.clear();
+            self.ui_state.database_browser.scan_cursor = 0;
+            self.ui_state.database_browser.scan_complete = false;
+            self.ui_state.database_browser.selected_key_index = 0;
+            // Load keys with filter
+            self.load_keys().await?;
+            // Exit search mode after applying
+            self.ui_state.database_browser.search_mode = false;
+        }
         Ok(())
     }
 }
