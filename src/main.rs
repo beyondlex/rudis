@@ -108,12 +108,13 @@ impl App {
         
         let area = frame.area();
         
-        // Create main layout: header + body + footer
+        // Create main layout: header + body + command + footer
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Header
-                Constraint::Min(0),     // Body
+                Constraint::Min(0),     // Body (main panels)
+                Constraint::Length(4),  // Command input
                 Constraint::Length(3),  // Footer
             ])
             .split(area);
@@ -165,10 +166,25 @@ impl App {
             content
         };
         
+        // Style based on focus
+        let is_connections_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::ConnectionList);
+        let connections_style = if is_connections_focused {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default()
+        };
+        let connections_border_style = if is_connections_focused {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        
         frame.render_widget(
             Paragraph::new(connections_content)
-                .block(Block::bordered().title(connections_title))
-                .style(Style::default()),
+                .block(Block::bordered()
+                    .title(connections_title)
+                    .border_style(connections_border_style))
+                .style(connections_style),
             body_layout[0],
         );
         
@@ -180,10 +196,25 @@ impl App {
             "Select a connection\nto browse databases"
         };
         
+        // Style based on focus
+        let is_db_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::DatabaseBrowser);
+        let db_style = if is_db_focused {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default()
+        };
+        let db_border_style = if is_db_focused {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        
         frame.render_widget(
             Paragraph::new(db_content)
-                .block(Block::bordered().title(db_title))
-                .style(Style::default()),
+                .block(Block::bordered()
+                    .title(db_title)
+                    .border_style(db_border_style))
+                .style(db_style),
             body_layout[1],
         );
         
@@ -191,11 +222,57 @@ impl App {
         let viewer_title = "Key Viewer";
         let viewer_content = "Select a key\nto view its content";
         
+        // Style based on focus
+        let is_viewer_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::KeyViewer);
+        let viewer_style = if is_viewer_focused {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default()
+        };
+        let viewer_border_style = if is_viewer_focused {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        
         frame.render_widget(
             Paragraph::new(viewer_content)
-                .block(Block::bordered().title(viewer_title))
-                .style(Style::default()),
+                .block(Block::bordered()
+                    .title(viewer_title)
+                    .border_style(viewer_border_style))
+                .style(viewer_style),
             body_layout[2],
+        );
+        
+        // Render command input panel
+        let command_title = "Command Input (Redis CLI)";
+        let command_state = &self.state.ui_state.command_input;
+        let command_content = if command_state.input.is_empty() {
+            "Type Redis commands here... (e.g., INFO, PING, GET mykey)"
+        } else {
+            &command_state.input
+        };
+        
+        // Style based on focus
+        let is_command_focused = matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput);
+        let command_style = if is_command_focused {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default()
+        };
+        let command_border_style = if is_command_focused {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        
+        frame.render_widget(
+            Paragraph::new(command_content)
+                .block(Block::bordered()
+                    .title(command_title)
+                    .border_style(command_border_style))
+                .style(command_style),
+            main_layout[2],
         );
         
         // Render footer with status and shortcuts
@@ -204,16 +281,24 @@ impl App {
             .map(|s| s.as_str())
             .unwrap_or("Ready");
         
+        // Show current focused panel
+        let focused_panel_name = match self.state.ui_state.focused_panel {
+            crate::app::FocusedPanel::ConnectionList => "Connections",
+            crate::app::FocusedPanel::DatabaseBrowser => "Database",
+            crate::app::FocusedPanel::KeyViewer => "Key Viewer",
+            crate::app::FocusedPanel::CommandInput => "Command",
+        };
+        
         let footer_text = format!(
-            "{} | q:Quit c:Connect Tab:Navigate ?:Help",
-            status_text
+            "{} | Focus: {} | q:Quit c:Connect Tab:Navigate ?:Help",
+            status_text, focused_panel_name
         );
         
         frame.render_widget(
             Paragraph::new(footer_text)
                 .block(Block::bordered())
                 .style(Style::default().bg(Color::DarkGray)),
-            main_layout[2],
+            main_layout[3],
         );
         
         // Render connection dialog if open
@@ -394,9 +479,28 @@ impl App {
                 self.state.previous_panel();
             }
             
-            // Connection management
-            (_, KeyCode::Char('c')) => {
-                self.state.open_connection_dialog();
+            // Command execution
+            (_, KeyCode::Enter) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
+                    self.execute_command().await?;
+                }
+            }
+            
+            // Character input for command panel (only when not in dialog)
+            (_, KeyCode::Char(ch)) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
+                    self.state.ui_state.command_input.input.push(ch);
+                } else if ch == 'c' {
+                    // Handle 'c' for connection dialog if not in command input mode
+                    self.state.open_connection_dialog();
+                }
+            }
+            
+            // Backspace for command panel
+            (_, KeyCode::Backspace) => {
+                if matches!(self.state.ui_state.focused_panel, crate::app::FocusedPanel::CommandInput) {
+                    self.state.ui_state.command_input.input.pop();
+                }
             }
             
             // View switching
@@ -479,6 +583,79 @@ impl App {
             
             _ => {}
         }
+        Ok(())
+    }
+    
+    /// Execute Redis command from command input
+    async fn execute_command(&mut self) -> AppResult<()> {
+        let command_text = self.state.ui_state.command_input.input.trim().to_string();
+        
+        if command_text.is_empty() {
+            return Ok(());
+        }
+        
+        // Check if we have an active connection
+        let has_connection = self.state.active_connection.is_some();
+        
+        if !has_connection {
+            self.state.set_status("No active connection. Please connect to Redis first.".to_string());
+            return Ok(());
+        }
+        
+        // Parse command (simple split by whitespace for now)
+        let parts: Vec<&str> = command_text.split_whitespace().collect();
+        if parts.is_empty() {
+            return Ok(());
+        }
+        
+        let cmd = parts[0].to_uppercase();
+        let args: Vec<&str> = parts[1..].to_vec();
+        
+        // Execute the command
+        let result = {
+            if let Some(connection) = self.state.get_active_connection_mut() {
+                connection.execute_command(&cmd, &args).await
+            } else {
+                return Ok(());
+            }
+        };
+        
+        // Handle the result
+        match result {
+            Ok(output) => {
+                // Add to command history
+                let command_result = crate::app::CommandResult {
+                    command: command_text.clone(),
+                    result: Ok(output.clone()),
+                    timestamp: std::time::SystemTime::now(),
+                };
+                self.state.ui_state.command_input.results.push(command_result);
+                
+                // Show result in status
+                let preview = if output.len() > 50 {
+                    format!("{}...", &output[..50])
+                } else {
+                    output
+                };
+                self.state.set_status(format!("Result: {}", preview));
+            }
+            Err(err) => {
+                // Add error to command history
+                let command_result = crate::app::CommandResult {
+                    command: command_text.clone(),
+                    result: Err(err.to_string()),
+                    timestamp: std::time::SystemTime::now(),
+                };
+                self.state.ui_state.command_input.results.push(command_result);
+                
+                self.state.set_status(format!("Error: {}", err));
+            }
+        }
+        
+        // Add to history and clear input
+        self.state.ui_state.command_input.history.push(command_text);
+        self.state.ui_state.command_input.input.clear();
+        
         Ok(())
     }
 }
