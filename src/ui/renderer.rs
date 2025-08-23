@@ -197,7 +197,7 @@ impl AppRenderer {
                             // Create indentation based on depth
                             let indent = "  ".repeat(display_info.depth);
                             
-                            if display_info.is_leaf {
+                            if display_info.is_key {
                                 // This is an actual Redis key
                                 let type_icon = if let Some(key_info) = &display_info.key_info {
                                     match key_info.key_type.as_deref() {
@@ -231,7 +231,18 @@ impl AppRenderer {
                                     display_info.name.clone()
                                 };
                                 
-                                content.push_str(&format!("{}{}{} {}{}\n", marker, indent, type_icon, display_name, ttl_info));
+                                // Add folder indicator if this key also has children
+                                let folder_indicator = if display_info.has_children {
+                                    if display_info.is_expanded {
+                                        " 📂"
+                                    } else {
+                                        " 📁"
+                                    }
+                                } else {
+                                    ""
+                                };
+                                
+                                content.push_str(&format!("{}{}{} {}{}{}\n", marker, indent, type_icon, display_name, ttl_info, folder_indicator));
                             } else {
                                 // This is a folder/namespace node
                                 let folder_icon = if display_info.is_expanded {

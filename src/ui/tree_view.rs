@@ -43,9 +43,15 @@ impl TreeNode {
         }
     }
     
-    /// Check if this node is a leaf (actual Redis key)
-    pub fn is_leaf(&self) -> bool {
+    /// Check if this node represents an actual Redis key
+    pub fn is_key(&self) -> bool {
         self.key_info.is_some()
+    }
+    
+    /// Check if this node is a leaf (actual Redis key with no children)
+    /// Note: A node can be both a key AND have children (hybrid node)
+    pub fn is_leaf(&self) -> bool {
+        self.key_info.is_some() && self.children.is_empty()
     }
     
     /// Check if this node has children
@@ -121,22 +127,21 @@ impl KeyTree {
         
         // Navigate to the correct position and create intermediate nodes
         let mut current = &mut self.root;
-        let mut current_path = String::new();
         
         for (i, segment) in segments.iter().enumerate() {
-            // Update current path
-            if current_path.is_empty() {
-                current_path = segment.clone();
-            } else {
-                current_path = format!("{}{}{}", current_path, self.separator, segment);
-            }
-            
             let is_last = i == segments.len() - 1;
             
             if is_last {
-                // This is the actual key - create a leaf node
-                let leaf = TreeNode::new_leaf(segment.clone(), key_info.clone(), i + 1);
-                current.children.insert(segment.clone(), leaf);
+                // This is the actual key
+                if let Some(existing_node) = current.children.get_mut(segment) {
+                    // Node already exists, just add key info to it (hybrid node)
+                    existing_node.key_info = Some(key_info.clone());
+                    existing_node.full_path = Some(key_info.name.clone());
+                } else {
+                    // Create new leaf node
+                    let leaf = TreeNode::new_leaf(segment.clone(), key_info.clone(), i + 1);
+                    current.children.insert(segment.clone(), leaf);
+                }
             } else {
                 // This is an intermediate node - create if doesn't exist
                 if !current.children.contains_key(segment) {
@@ -144,7 +149,7 @@ impl KeyTree {
                     current.children.insert(segment.clone(), intermediate);
                 }
                 
-                // Move to the child node
+                // Move to the child node - this now works even if it was previously a leaf
                 current = current.children.get_mut(segment).unwrap();
             }
         }
@@ -249,6 +254,7 @@ impl KeyTree {
             full_path: path.clone(),
             depth: node.depth,
             is_leaf: node.is_leaf(),
+            is_key: node.is_key(), // Add this field
             is_expanded: node.is_expanded,
             has_children: node.has_children(),
             key_info: node.key_info.clone(),
@@ -269,7 +275,7 @@ impl KeyTree {
         })
     }
     
-    /// Get actual Redis key info at visible index (if it's a leaf)
+    /// Get actual Redis key info at visible index (if it's a key)
     pub fn get_key_info_at_index(&self, index: usize) -> Option<&KeyInfo> {
         if index >= self.visible_nodes.len() {
             return None;
@@ -279,7 +285,7 @@ impl KeyTree {
         let segments = self.node_map.get(path)?;
         let node = self.get_node(segments)?;
         
-        if node.is_leaf() {
+        if node.is_key() {
             node.key_info.as_ref()
         } else {
             None
@@ -296,12 +302,14 @@ pub struct TreeDisplayInfo {
     pub full_path: String,
     /// Tree depth for indentation
     pub depth: usize,
-    /// Whether this is an actual Redis key
+    /// Whether this is an actual Redis key (can have children too)
+    pub is_key: bool,
+    /// Whether this is an actual Redis key with no children
     pub is_leaf: bool,
     /// Whether this node is expanded (only relevant for non-leaves)
     pub is_expanded: bool,
     /// Whether this node has children
     pub has_children: bool,
-    /// Key information if this is a leaf
+    /// Key information if this is a key
     pub key_info: Option<KeyInfo>,
 }

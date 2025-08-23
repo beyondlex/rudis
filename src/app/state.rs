@@ -1803,12 +1803,12 @@ impl AppState {
                     
                     // Update selected key from tree
                     if let Some(display_info) = browser.key_tree.get_visible_node_info(browser.selected_key_index) {
-                        if display_info.is_leaf {
+                        if display_info.is_key {
                             if let Some(key_info) = &display_info.key_info {
                                 self.selected_key = Some(key_info.name.clone());
                             }
                         } else {
-                            // For non-leaf nodes, clear selected key
+                            // For non-key nodes, clear selected key
                             self.selected_key = None;
                         }
                     }
@@ -1855,12 +1855,12 @@ impl AppState {
                     
                     // Update selected key from tree
                     if let Some(display_info) = browser.key_tree.get_visible_node_info(browser.selected_key_index) {
-                        if display_info.is_leaf {
+                        if display_info.is_key {
                             if let Some(key_info) = &display_info.key_info {
                                 self.selected_key = Some(key_info.name.clone());
                             }
                         } else {
-                            // For non-leaf nodes, clear selected key
+                            // For non-key nodes, clear selected key
                             self.selected_key = None;
                         }
                     }
