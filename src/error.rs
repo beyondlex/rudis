@@ -62,5 +62,17 @@ impl From<toml::ser::Error> for AppError {
     }
 }
 
+impl From<serde_yaml::Error> for AppError {
+    fn from(err: serde_yaml::Error) -> Self {
+        AppError::Serialization(err.to_string())
+    }
+}
+
+impl From<csv::Error> for AppError {
+    fn from(err: csv::Error) -> Self {
+        AppError::Serialization(err.to_string())
+    }
+}
+
 /// Application result type
 pub type AppResult<T> = Result<T, AppError>;

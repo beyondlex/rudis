@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Paragraph},
+    widgets::{Block, Paragraph, Wrap},
     prelude::Stylize,
 };
 
@@ -33,6 +33,31 @@ impl AppRenderer {
         Self::render_body_panels(state, frame, main_layout[1]);
         Self::render_command_panel(state, frame, main_layout[2]);
         Self::render_footer(state, frame, main_layout[3]);
+        
+        // Render dialog overlay if open
+        if state.ui_state.connection_dialog.is_open {
+            crate::ui::DialogRenderer::render_connection_dialog(state, frame, area);
+        }
+        
+        // Render confirmation dialog if open
+        if state.ui_state.confirmation_dialog.is_open {
+            state.ui_state.confirmation_dialog.render(frame, area);
+        }
+        
+        // Render export/import dialog if open
+        if state.ui_state.export_import_dialog.is_open {
+            state.ui_state.export_import_dialog.render(frame, area);
+        }
+        
+        // Render bulk operations dialog if open
+        if state.ui_state.bulk_operations_dialog.is_open {
+            state.ui_state.bulk_operations_dialog.render(frame, area);
+        }
+        
+        // Render progress bars if active
+        if state.has_active_progress() {
+            state.ui_state.progress_bar_manager.render(frame, area);
+        }
     }
 
     /// Renders the application header
@@ -228,8 +253,38 @@ impl AppRenderer {
 
     /// Renders the key viewer panel
     fn render_key_viewer_panel(state: &AppState, frame: &mut Frame, area: Rect) {
-        let viewer_title = "Key Viewer";
-        let viewer_content = "Select a key\nto view its content";
+        let viewer_state = &state.ui_state.key_viewer;
+        
+        let viewer_title = if let Some(key_name) = &viewer_state.current_key {
+            format!("Key Viewer - {}", key_name)
+        } else {
+            "Key Viewer".to_string()
+        };
+        
+        let viewer_content = if viewer_state.loading {
+            "Loading key value...".to_string()
+        } else if let (Some(key_name), Some(value)) = (&viewer_state.current_key, &viewer_state.value) {
+            // Use the value display component to render the content
+            let display_lines = crate::ui::ValueDisplayComponent::render_value(
+                key_name.clone(),
+                value,
+                viewer_state,
+                20, // Max display items
+            );
+            
+            // Convert lines to text for display
+            display_lines.into_iter()
+                .map(|line| {
+                    line.spans.into_iter()
+                        .map(|span| span.content.to_string())
+                        .collect::<Vec<_>>()
+                        .join("")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            "Select a key to view its content\n\nShortcuts:\n→ View selected key\nEnter: Refresh value\ne: Edit mode\nc: Copy value".to_string()
+        };
         
         // Style based on focus
         let is_focused = matches!(state.ui_state.focused_panel, FocusedPanel::KeyViewer);
@@ -249,7 +304,8 @@ impl AppRenderer {
                 .block(Block::bordered()
                     .title(viewer_title)
                     .border_style(border_style))
-                .style(style),
+                .style(style)
+                .wrap(Wrap { trim: true }),
             area,
         );
     }

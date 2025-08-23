@@ -60,6 +60,12 @@ impl EventHandler {
             return Self::handle_dialog_key_event(app_state, key).await;
         }
         
+        // Handle progress bar dismissal
+        if app_state.has_active_progress() && matches!(key.code, KeyCode::Esc) {
+            app_state.dismiss_progress_bars();
+            return Ok(());
+        }
+        
         match (key.modifiers, key.code) {
             // Quit application or exit search mode
             (_, KeyCode::Esc | KeyCode::Char('q'))  => {
@@ -398,8 +404,23 @@ impl EventHandler {
             // Load available databases
             app_state.load_databases().await?;
             
-            // Select database 0 by default
-            app_state.select_database(0).await?;
+            // Select database 0 by default and load keys silently
+            if let Some(connection) = app_state.get_active_connection_mut() {
+                match connection.select_database(0).await {
+                    Ok(()) => {
+                        app_state.ui_state.database_browser.selected_database = 0;
+                        app_state.selected_database = Some(0);
+                        
+                        // Load keys silently without progress dialog
+                        app_state.load_keys_silent().await?;
+                        
+                        app_state.set_status("Connected to database 0".to_string());
+                    }
+                    Err(err) => {
+                        app_state.set_status(format!("Failed to select database 0: {}", err));
+                    }
+                }
+            }
         }
         Ok(())
     }
