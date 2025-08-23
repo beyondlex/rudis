@@ -1,0 +1,1 @@
+// Command input component - placeholder for Phase 1

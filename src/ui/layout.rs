@@ -1,0 +1,1 @@
+// UI layout management - placeholder for Phase 1

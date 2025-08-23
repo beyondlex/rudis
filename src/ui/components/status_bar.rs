@@ -1,0 +1,1 @@
+// Status bar component - placeholder for Phase 1

@@ -1,0 +1,1 @@
+// Key viewer component - placeholder for Phase 1

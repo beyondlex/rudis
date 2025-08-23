@@ -1,0 +1,1 @@
+// Database browser component - placeholder for Phase 1
