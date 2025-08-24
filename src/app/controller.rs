@@ -2,7 +2,7 @@ use ratatui::{DefaultTerminal, Frame};
 use tokio::time::{timeout, Duration};
 use crossterm::event;
 
-use crate::app::AppState;
+use crate::app::state_core::AppState;
 use crate::error::{AppError, AppResult};
 use crate::events::{AppEvent, EventHandler};
 use crate::ui::{AppRenderer, DialogRenderer};

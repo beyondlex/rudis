@@ -5,7 +5,8 @@ use ratatui::{
 };
 
 use crate::redis::value_types::{RedisValue, StreamEntry};
-use crate::app::KeyViewerState;
+use crate::app::states::KeyViewerState;
+use crate::app::state_core::{HashEditMode, ListEditMode, SetEditMode, ZSetEditMode, StreamViewMode};
 
 /// Component for rendering Redis values in the key viewer panel
 pub struct ValueDisplayComponent;
@@ -327,22 +328,22 @@ impl ValueDisplayComponent {
         
         // Show edit mode status
         match viewer_state.hash_edit_mode {
-            crate::app::HashEditMode::Field => {
+            HashEditMode::Field => {
                 lines.push(Line::from(vec![
                     Span::styled("EDIT FIELD NAME", Style::default().fg(Color::Black).bg(Color::Yellow)),
                 ]));
             }
-            crate::app::HashEditMode::Value => {
+            HashEditMode::Value => {
                 lines.push(Line::from(vec![
                     Span::styled("EDIT FIELD VALUE", Style::default().fg(Color::Black).bg(Color::Yellow)),
                 ]));
             }
-            crate::app::HashEditMode::NewField => {
+            HashEditMode::NewField => {
                 lines.push(Line::from(vec![
                     Span::styled("ADD NEW FIELD", Style::default().fg(Color::Black).bg(Color::Green)),
                 ]));
             }
-            crate::app::HashEditMode::None => {}
+            HashEditMode::None => {}
         }
         
         lines.push(Line::from(""));
@@ -353,8 +354,8 @@ impl ValueDisplayComponent {
         // Show existing fields
         for (i, (field, value)) in fields.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
             let is_selected = viewer_state.hash_field_index == i;
-            let is_editing_field = is_selected && viewer_state.hash_edit_mode == crate::app::HashEditMode::Field;
-            let is_editing_value = is_selected && viewer_state.hash_edit_mode == crate::app::HashEditMode::Value;
+            let is_editing_field = is_selected && viewer_state.hash_edit_mode == HashEditMode::Field;
+            let is_editing_value = is_selected && viewer_state.hash_edit_mode == HashEditMode::Value;
             
             // Selection indicator
             let selection_marker = if is_selected { "> " } else { "  " };
@@ -408,7 +409,7 @@ impl ValueDisplayComponent {
         }
         
         // Show new field editor if in NewField mode
-        if viewer_state.hash_edit_mode == crate::app::HashEditMode::NewField {
+        if viewer_state.hash_edit_mode == HashEditMode::NewField {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("> ", Style::default().fg(Color::Green)),
@@ -429,13 +430,13 @@ impl ValueDisplayComponent {
         
         // Show controls based on edit mode
         match viewer_state.hash_edit_mode {
-            crate::app::HashEditMode::None => {
+            HashEditMode::None => {
                 lines.push(Line::from(vec![
                     Span::styled("↑/↓: Select | Enter: Edit Value | f: Edit Field | n: New Field | Del: Delete", 
                                Style::default().fg(Color::Gray)),
                 ]));
             }
-            crate::app::HashEditMode::Field | crate::app::HashEditMode::Value => {
+            HashEditMode::Field | HashEditMode::Value => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Save | Esc: Cancel | Tab: Switch Field/Value", 
                                Style::default().fg(Color::Yellow)),
@@ -446,7 +447,7 @@ impl ValueDisplayComponent {
                     ]));
                 }
             }
-            crate::app::HashEditMode::NewField => {
+            HashEditMode::NewField => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Add Field | Esc: Cancel | Tab: Switch Field/Value", 
                                Style::default().fg(Color::Yellow)),
@@ -471,22 +472,22 @@ impl ValueDisplayComponent {
         
         // Show edit mode status
         match viewer_state.list_edit_mode {
-            crate::app::ListEditMode::Element => {
+            ListEditMode::Element => {
                 lines.push(Line::from(vec![
                     Span::styled("EDIT ELEMENT", Style::default().fg(Color::Black).bg(Color::Yellow)),
                 ]));
             }
-            crate::app::ListEditMode::Insert => {
+            ListEditMode::Insert => {
                 lines.push(Line::from(vec![
                     Span::styled("INSERT ELEMENT", Style::default().fg(Color::Black).bg(Color::Green)),
                 ]));
             }
-            crate::app::ListEditMode::Append => {
+            ListEditMode::Append => {
                 lines.push(Line::from(vec![
                     Span::styled("APPEND ELEMENT", Style::default().fg(Color::Black).bg(Color::Green)),
                 ]));
             }
-            crate::app::ListEditMode::None => {}
+            ListEditMode::None => {}
         }
         
         lines.push(Line::from(""));
@@ -497,8 +498,8 @@ impl ValueDisplayComponent {
         // Show existing elements
         for (i, element) in elements.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
             let is_selected = viewer_state.list_element_index == i;
-            let is_editing = is_selected && viewer_state.list_edit_mode == crate::app::ListEditMode::Element;
-            let is_insert_position = viewer_state.list_edit_mode == crate::app::ListEditMode::Insert 
+            let is_editing = is_selected && viewer_state.list_edit_mode == ListEditMode::Element;
+            let is_insert_position = viewer_state.list_edit_mode == ListEditMode::Insert 
                 && viewer_state.list_insert_index == Some(i);
             
             // Show insert editor above current element if this is insert position
@@ -544,7 +545,7 @@ impl ValueDisplayComponent {
         }
         
         // Show append editor if in Append mode
-        if viewer_state.list_edit_mode == crate::app::ListEditMode::Append {
+        if viewer_state.list_edit_mode == ListEditMode::Append {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("> ", Style::default().fg(Color::Green)),
@@ -560,13 +561,13 @@ impl ValueDisplayComponent {
         
         // Show controls based on edit mode
         match viewer_state.list_edit_mode {
-            crate::app::ListEditMode::None => {
+            ListEditMode::None => {
                 lines.push(Line::from(vec![
                     Span::styled("↑/↓: Select | Enter: Edit | i: Insert | a: Append | Del: Delete | ↑↓: Move", 
                                Style::default().fg(Color::Gray)),
                 ]));
             }
-            crate::app::ListEditMode::Element | crate::app::ListEditMode::Insert | crate::app::ListEditMode::Append => {
+            ListEditMode::Element | ListEditMode::Insert | ListEditMode::Append => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Save | Esc: Cancel", 
                                Style::default().fg(Color::Yellow)),
@@ -596,17 +597,17 @@ impl ValueDisplayComponent {
         
         // Show edit mode status
         match viewer_state.set_edit_mode {
-            crate::app::SetEditMode::Add => {
+            SetEditMode::Add => {
                 lines.push(Line::from(vec![
                     Span::styled("ADD MEMBER", Style::default().fg(Color::Black).bg(Color::Green)),
                 ]));
             }
-            crate::app::SetEditMode::Remove => {
+            SetEditMode::Remove => {
                 lines.push(Line::from(vec![
                     Span::styled("REMOVE MEMBER", Style::default().fg(Color::Black).bg(Color::Red)),
                 ]));
             }
-            crate::app::SetEditMode::None => {}
+            SetEditMode::None => {}
         }
         
         lines.push(Line::from(""));
@@ -617,7 +618,7 @@ impl ValueDisplayComponent {
         // Show existing members
         for (i, member) in members.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
             let is_selected = viewer_state.set_member_index == i;
-            let is_removing = is_selected && viewer_state.set_edit_mode == crate::app::SetEditMode::Remove;
+            let is_removing = is_selected && viewer_state.set_edit_mode == SetEditMode::Remove;
             
             // Selection indicator
             let selection_marker = if is_selected { "> " } else { "  " };
@@ -653,7 +654,7 @@ impl ValueDisplayComponent {
         }
         
         // Show add member editor if in Add mode
-        if viewer_state.set_edit_mode == crate::app::SetEditMode::Add {
+        if viewer_state.set_edit_mode == SetEditMode::Add {
             lines.push(Line::from(""));
             
             // Check if member already exists
@@ -689,13 +690,13 @@ impl ValueDisplayComponent {
         
         // Show controls based on edit mode
         match viewer_state.set_edit_mode {
-            crate::app::SetEditMode::None => {
+            SetEditMode::None => {
                 lines.push(Line::from(vec![
                     Span::styled("↑/↓: Select | a: Add Member | Del: Remove Member", 
                                Style::default().fg(Color::Gray)),
                 ]));
             }
-            crate::app::SetEditMode::Add => {
+            SetEditMode::Add => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Add Member | Esc: Cancel", 
                                Style::default().fg(Color::Yellow)),
@@ -706,7 +707,7 @@ impl ValueDisplayComponent {
                     ]));
                 }
             }
-            crate::app::SetEditMode::Remove => {
+            SetEditMode::Remove => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Confirm Remove | Esc: Cancel", 
                                Style::default().fg(Color::Red)),
@@ -741,22 +742,22 @@ impl ValueDisplayComponent {
         
         // Show edit mode status
         match viewer_state.zset_edit_mode {
-            crate::app::ZSetEditMode::Add => {
+            ZSetEditMode::Add => {
                 lines.push(Line::from(vec![
                     Span::styled("ADD MEMBER", Style::default().fg(Color::Black).bg(Color::Green)),
                 ]));
             }
-            crate::app::ZSetEditMode::UpdateScore => {
+            ZSetEditMode::UpdateScore => {
                 lines.push(Line::from(vec![
                     Span::styled("UPDATE SCORE", Style::default().fg(Color::Black).bg(Color::Yellow)),
                 ]));
             }
-            crate::app::ZSetEditMode::Remove => {
+            ZSetEditMode::Remove => {
                 lines.push(Line::from(vec![
                     Span::styled("REMOVE MEMBER", Style::default().fg(Color::Black).bg(Color::Red)),
                 ]));
             }
-            crate::app::ZSetEditMode::None => {}
+            ZSetEditMode::None => {}
         }
         
         lines.push(Line::from(""));
@@ -767,8 +768,8 @@ impl ValueDisplayComponent {
         // Show existing members
         for (i, (member, score)) in members.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
             let is_selected = viewer_state.zset_member_index == i;
-            let is_removing = is_selected && viewer_state.zset_edit_mode == crate::app::ZSetEditMode::Remove;
-            let is_updating_score = is_selected && viewer_state.zset_edit_mode == crate::app::ZSetEditMode::UpdateScore;
+            let is_removing = is_selected && viewer_state.zset_edit_mode == ZSetEditMode::Remove;
+            let is_updating_score = is_selected && viewer_state.zset_edit_mode == ZSetEditMode::UpdateScore;
             
             // Selection indicator
             let selection_marker = if is_selected { "> " } else { "  " };
@@ -822,7 +823,7 @@ impl ValueDisplayComponent {
         }
         
         // Show add member editor if in Add mode
-        if viewer_state.zset_edit_mode == crate::app::ZSetEditMode::Add {
+        if viewer_state.zset_edit_mode == ZSetEditMode::Add {
             lines.push(Line::from(""));
             
             // Validate score input
@@ -857,13 +858,13 @@ impl ValueDisplayComponent {
         
         // Show controls based on edit mode
         match viewer_state.zset_edit_mode {
-            crate::app::ZSetEditMode::None => {
+            ZSetEditMode::None => {
                 lines.push(Line::from(vec![
                     Span::styled("↑/↓: Select | a: Add Member | s: Update Score | Del: Remove", 
                                Style::default().fg(Color::Gray)),
                 ]));
             }
-            crate::app::ZSetEditMode::Add => {
+            ZSetEditMode::Add => {
                 lines.push(Line::from(vec![
                     Span::styled("Tab: Switch Score/Member | Enter: Add | Esc: Cancel", 
                                Style::default().fg(Color::Yellow)),
@@ -874,7 +875,7 @@ impl ValueDisplayComponent {
                     ]));
                 }
             }
-            crate::app::ZSetEditMode::UpdateScore => {
+            ZSetEditMode::UpdateScore => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Update Score | Esc: Cancel", 
                                Style::default().fg(Color::Yellow)),
@@ -885,7 +886,7 @@ impl ValueDisplayComponent {
                     ]));
                 }
             }
-            crate::app::ZSetEditMode::Remove => {
+            ZSetEditMode::Remove => {
                 lines.push(Line::from(vec![
                     Span::styled("Enter: Confirm Remove | Esc: Cancel", 
                                Style::default().fg(Color::Red)),
@@ -910,8 +911,8 @@ impl ValueDisplayComponent {
         
         // Show view mode
         let view_mode_text = match viewer_state.stream_view_mode {
-            crate::app::StreamViewMode::List => "List View",
-            crate::app::StreamViewMode::Detail => "Detail View",
+            StreamViewMode::List => "List View",
+            StreamViewMode::Detail => "Detail View",
         };
         lines.push(Line::from(vec![
             Span::styled("Mode: ", Style::default().fg(Color::Cyan)),
@@ -922,10 +923,10 @@ impl ValueDisplayComponent {
         lines.push(Line::from(""));
         
         match viewer_state.stream_view_mode {
-            crate::app::StreamViewMode::List => {
+            StreamViewMode::List => {
                 Self::render_stream_list_view(&entries, lines, viewer_state, max_display_items);
             }
-            crate::app::StreamViewMode::Detail => {
+            StreamViewMode::Detail => {
                 Self::render_stream_detail_view(&entries, lines, viewer_state);
             }
         }
@@ -934,13 +935,13 @@ impl ValueDisplayComponent {
         
         // Show controls based on view mode
         match viewer_state.stream_view_mode {
-            crate::app::StreamViewMode::List => {
+            StreamViewMode::List => {
                 lines.push(Line::from(vec![
                     Span::styled("↑/↓: Select Entry | Enter/Space: Detail View | PgUp/PgDn: Page", 
                                Style::default().fg(Color::Gray)),
                 ]));
             }
-            crate::app::StreamViewMode::Detail => {
+            StreamViewMode::Detail => {
                 lines.push(Line::from(vec![
                     Span::styled("↑/↓: Navigate Entry | ←/→: Navigate Fields | Space: List View", 
                                Style::default().fg(Color::Gray)),
@@ -948,7 +949,7 @@ impl ValueDisplayComponent {
             }
         }
         
-        if viewer_state.stream_view_mode == crate::app::StreamViewMode::List {
+        if viewer_state.stream_view_mode == StreamViewMode::List {
             Self::add_pagination_info(lines, viewer_state, entries.len());
         }
     }

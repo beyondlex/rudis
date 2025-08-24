@@ -1,4 +1,130 @@
-use crate::app::{HashEditMode, KeyViewerState, ListEditMode, SetEditMode, StreamViewMode, ZSetEditMode};
+use crate::app::state_core::{HashEditMode, ListEditMode, SetEditMode, StreamViewMode, ZSetEditMode, KeyMetadata};
+
+/// State for key viewer panel
+#[derive(Debug)]
+pub struct KeyViewerState {
+    /// Current key name being viewed
+    pub current_key: Option<String>,
+    /// Current key value with type-specific data
+    pub value: Option<crate::redis::value_types::RedisValue>,
+    /// Key metadata (type, ttl, size)
+    pub metadata: Option<KeyMetadata>,
+    /// Current page for paginated data types
+    pub current_page: usize,
+    /// Items per page for paginated data types
+    pub page_size: usize,
+    /// Scroll position in content
+    pub scroll_position: usize,
+    /// Whether we're in edit mode
+    pub edit_mode: bool,
+    /// Edit buffer for string values
+    pub edit_buffer: String,
+    /// Cursor position in edit buffer
+    pub edit_cursor_position: usize,
+    /// Original value before editing (for cancellation)
+    pub original_value: Option<String>,
+    /// Whether there are unsaved changes
+    pub has_unsaved_changes: bool,
+    /// Loading state
+    pub loading: bool,
+    /// Hash field editing state
+    pub hash_field_index: usize,
+    /// Selected hash field for editing
+    pub selected_hash_field: Option<String>,
+    /// Hash field edit mode (None, Field, Value)
+    pub hash_edit_mode: HashEditMode,
+    /// Hash field edit buffer
+    pub hash_field_buffer: String,
+    /// Hash value edit buffer
+    pub hash_value_buffer: String,
+    /// Original hash field name (for field renaming)
+    pub original_field_name: Option<String>,
+    /// List element editing state
+    pub list_element_index: usize,
+    /// Selected list element for editing
+    pub selected_list_element: Option<String>,
+    /// List edit mode (None, Element, Insert)
+    pub list_edit_mode: ListEditMode,
+    /// List element edit buffer
+    pub list_element_buffer: String,
+    /// Insert position for new elements
+    pub list_insert_index: Option<usize>,
+    /// Set member editing state
+    pub set_member_index: usize,
+    /// Selected set member for operations
+    pub selected_set_member: Option<String>,
+    /// Set edit mode (None, Add, Remove)
+    pub set_edit_mode: SetEditMode,
+    /// Set member edit buffer
+    pub set_member_buffer: String,
+    /// Sorted set editing state
+    pub zset_member_index: usize,
+    /// Selected sorted set member for operations
+    pub selected_zset_member: Option<String>,
+    /// Sorted set edit mode (None, Add, Remove, UpdateScore)
+    pub zset_edit_mode: ZSetEditMode,
+    /// Sorted set member edit buffer
+    pub zset_member_buffer: String,
+    /// Sorted set score edit buffer
+    pub zset_score_buffer: String,
+    /// Stream viewing state
+    pub stream_entry_index: usize,
+    /// Selected stream entry for viewing
+    pub selected_stream_entry: Option<String>, // Entry ID
+    /// Stream view mode (List, Detail)
+    pub stream_view_mode: StreamViewMode,
+    /// Stream field index for detail view
+    pub stream_field_index: usize,
+    /// Binary display mode for binary data
+    pub binary_display_mode: crate::ui::binary_viewer::DisplayMode,
+    /// Whether to enable JSON syntax highlighting
+    pub json_highlighting_enabled: bool,
+}
+
+impl Default for KeyViewerState {
+    fn default() -> Self {
+        Self {
+            current_key: None,
+            value: None,
+            metadata: None,
+            current_page: 0,
+            page_size: 50,
+            scroll_position: 0,
+            edit_mode: false,
+            edit_buffer: String::new(),
+            edit_cursor_position: 0,
+            original_value: None,
+            has_unsaved_changes: false,
+            loading: false,
+            hash_field_index: 0,
+            selected_hash_field: None,
+            hash_edit_mode: HashEditMode::None,
+            hash_field_buffer: String::new(),
+            hash_value_buffer: String::new(),
+            original_field_name: None,
+            list_element_index: 0,
+            selected_list_element: None,
+            list_edit_mode: ListEditMode::None,
+            list_element_buffer: String::new(),
+            list_insert_index: None,
+            set_member_index: 0,
+            selected_set_member: None,
+            set_edit_mode: SetEditMode::None,
+            set_member_buffer: String::new(),
+            zset_member_index: 0,
+            selected_zset_member: None,
+            zset_edit_mode: ZSetEditMode::None,
+            zset_member_buffer: String::new(),
+            zset_score_buffer: String::new(),
+            stream_entry_index: 0,
+            selected_stream_entry: None,
+            stream_view_mode: StreamViewMode::List,
+            stream_field_index: 0,
+            binary_display_mode: crate::ui::binary_viewer::DisplayMode::Auto,
+            json_highlighting_enabled: true,
+        }
+    }
+}
 
 impl KeyViewerState {
     /// Enter edit mode for string values

@@ -571,7 +571,7 @@ impl EventHandler {
             let key_viewer = &mut app_state.ui_state.key_viewer;
             key_viewer.current_key = Some(key_name.to_string());
             key_viewer.value = Some(redis_value);
-            key_viewer.metadata = Some(crate::app::KeyMetadata {
+            key_viewer.metadata = Some(crate::app::state_core::KeyMetadata {
                 key_type: key_type.clone(),
                 ttl,
                 size: 0, // TODO: Calculate size based on value
