@@ -186,6 +186,34 @@ impl EventHandler {
                                 app_state.set_status(format!("Tree view: {}", 
                                     if app_state.ui_state.database_browser.use_tree_view { "ON" } else { "OFF" }));
                             }
+                            'j' => {
+                                if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
+                                    app_state.select_next_key();
+                                    // Automatically load the selected key value
+                                    if let Some(key_info) = app_state.get_selected_key_info() {
+                                        let key_name = key_info.name.clone();
+                                        let _ = Self::load_key_value(app_state, &key_name).await;
+                                    }
+                                    // Only load more keys if we're very close to the end to avoid blocking
+                                    let browser = &app_state.ui_state.database_browser;
+                                    if !browser.scan_complete &&
+                                        browser.selected_key_index >= browser.keys.len().saturating_sub(1) &&
+                                        !browser.loading {
+                                        // Schedule async loading without blocking current navigation
+                                        let _ = app_state.schedule_key_loading();
+                                    }
+                                }
+                            }
+                            'k' => {
+                                if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
+                                    app_state.select_previous_key();
+                                    // Automatically load the selected key value
+                                    if let Some(key_info) = app_state.get_selected_key_info() {
+                                        let key_name = key_info.name.clone();
+                                        let _ = Self::load_key_value(app_state, &key_name).await;
+                                    }
+                                }
+                            }
                             '1' => {
                                 app_state.set_view(crate::app::ViewMode::ConnectionList);
                             }
@@ -232,51 +260,13 @@ impl EventHandler {
             
             // Arrow key navigation - optimized for responsiveness
             (_, KeyCode::Down) => {
-                if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
-                    app_state.select_next_key();
-                    // Automatically load the selected key value
-                    if let Some(key_info) = app_state.get_selected_key_info() {
-                        let key_name = key_info.name.clone();
-                        let _ = Self::load_key_value(app_state, &key_name).await;
-                    }
-                    // Only load more keys if we're very close to the end to avoid blocking
-                    let browser = &app_state.ui_state.database_browser;
-                    if !browser.scan_complete && 
-                       browser.selected_key_index >= browser.keys.len().saturating_sub(1) &&
-                       !browser.loading {
-                        // Schedule async loading without blocking current navigation
-                        let _ = app_state.schedule_key_loading();
-                    }
-                }
             }
             (_, KeyCode::Up) => {
-                if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
-                    app_state.select_previous_key();
-                    // Automatically load the selected key value
-                    if let Some(key_info) = app_state.get_selected_key_info() {
-                        let key_name = key_info.name.clone();
-                        let _ = Self::load_key_value(app_state, &key_name).await;
-                    }
-                }
             }
             (_, KeyCode::Right) => {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
-                    // Load selected key value and switch focus to Key Viewer
-                    if let Some(key_info) = app_state.get_selected_key_info() {
-                        let key_name = key_info.name.clone();
-                        match Self::load_key_value(app_state, &key_name).await {
-                            Ok(()) => {
-                                // Switch focus to Key Viewer panel
-                                // app_state.ui_state.focused_panel = FocusedPanel::KeyViewer;
-                                app_state.set_status(format!("Loaded key: {}", key_name));
-                            }
-                            Err(err) => {
-                                app_state.set_status(format!("Failed to load key {}: {}", key_name, err));
-                            }
-                        }
-                    } else {
-                        app_state.set_status("No key selected".to_string());
-                    }
+                    // Switch focus to Key Viewer panel
+                    app_state.ui_state.focused_panel = FocusedPanel::KeyViewer;
                 }
             }
             (_, KeyCode::Left) => {

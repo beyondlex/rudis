@@ -439,7 +439,7 @@ impl AppRenderer {
         // Create table headers
         let headers = ["ID", "Value"]
             .iter()
-            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Black).bold()))
             .collect::<Vec<_>>();
         
         // Create table rows from list elements
@@ -501,7 +501,7 @@ impl AppRenderer {
         // Create table headers
         let headers = ["ID", "Value"]
             .iter()
-            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Black).bold()))
             .collect::<Vec<_>>();
         
         // Create table rows from set members
@@ -563,7 +563,7 @@ impl AppRenderer {
         // Create table headers
         let headers = ["ID", "Score", "Member"]
             .iter()
-            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Black).bold()))
             .collect::<Vec<_>>();
         
         // Create table rows from zset members
