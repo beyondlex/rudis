@@ -213,7 +213,7 @@ impl ValueDisplayComponent {
                 ]));
             }
         } else {
-            let mut control_text = "e: Edit | Enter: View Raw | Ctrl+C: Copy".to_string();
+            let mut control_text = "e: External Editor ($EDITOR) | Enter: View Raw | Ctrl+C: Copy".to_string();
             
             // Add binary mode controls if binary data is detected
             if binary_info.has_binary_content {

@@ -109,6 +109,26 @@ impl EventHandler {
             (_, KeyCode::Char(ch)) => {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::CommandInput) {
                     app_state.ui_state.command_input.input.push(ch);
+                } else if matches!(app_state.ui_state.focused_panel, FocusedPanel::KeyViewer) {
+                    // Handle Key Viewer panel specific keys
+                    match ch {
+                        'e' => {
+                            // Open external editor for string values
+                            if let Some(crate::redis::value_types::RedisValue::String(_)) = &app_state.ui_state.key_viewer.value {
+                                Self::open_external_editor(app_state).await?;
+                            }
+                        }
+                        'c' => {
+                            // Handle 'c' for connection dialog
+                            app_state.open_connection_dialog();
+                        }
+                        '1' => app_state.set_view(crate::app::ViewMode::ConnectionList),
+                        '2' => app_state.set_view(crate::app::ViewMode::DatabaseBrowser),
+                        '3' => app_state.set_view(crate::app::ViewMode::KeyViewer),
+                        '4' => app_state.set_view(crate::app::ViewMode::CommandInterface),
+                        '?' => app_state.set_view(crate::app::ViewMode::Help),
+                        _ => {}
+                    }
                 } else if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     if app_state.ui_state.database_browser.search_mode {
                         // In search mode, add character to search pattern
@@ -538,6 +558,154 @@ impl EventHandler {
         Ok(())
     }
     
+    /// Open external editor for editing string values
+    async fn open_external_editor(app_state: &mut AppState) -> AppResult<()> {
+        use std::env;
+        use std::fs;
+        use std::process::Command;
+        use tokio::process::Command as TokioCommand;
+        
+        // Get the current string value and key name first
+        let (current_value, key_name) = {
+            let current_value = if let Some(crate::redis::value_types::RedisValue::String(s)) = &app_state.ui_state.key_viewer.value {
+                s.clone()
+            } else {
+                return Err(crate::error::AppError::Generic("No string value to edit".to_string()));
+            };
+            
+            let key_name = app_state.ui_state.key_viewer.current_key
+                .as_ref()
+                .ok_or_else(|| crate::error::AppError::Generic("No key selected".to_string()))?
+                .clone();
+                
+            (current_value, key_name)
+        };
+        
+        // Get editor from environment
+        let editor = env::var("EDITOR")
+            .or_else(|_| env::var("VISUAL"))
+            .unwrap_or_else(|_| "vim".to_string());
+        
+        // Create temporary file
+        let temp_file = format!("/tmp/rudis_edit_{}.txt", key_name.replace([':', '/', '\\'], "_"));
+        
+        // Write current value to temp file
+        fs::write(&temp_file, &current_value)
+            .map_err(|e| crate::error::AppError::Generic(format!("Failed to create temp file: {}", e)))?;
+        
+        // Show status message
+        app_state.set_status(format!("Opening {} for editing...", editor));
+        
+        // Save terminal state and exit raw mode for the editor
+        let _guard = {
+            use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+            use crossterm::execute;
+            use std::io::stdout;
+            
+            // Save current screen buffer and disable raw mode
+            execute!(stdout(), LeaveAlternateScreen)
+                .map_err(|e| crate::error::AppError::Generic(format!("Failed to leave alternate screen: {}", e)))?;
+            disable_raw_mode()
+                .map_err(|e| crate::error::AppError::Generic(format!("Failed to disable raw mode: {}", e)))?;
+            
+            // Custom guard to restore terminal state when dropped
+            struct TerminalStateGuard;
+            impl Drop for TerminalStateGuard {
+                fn drop(&mut self) {
+                    use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
+                    use crossterm::execute;
+                    use std::io::stdout;
+                    
+                    // Restore raw mode and alternate screen
+                    let _ = enable_raw_mode();
+                    let _ = execute!(stdout(), EnterAlternateScreen);
+                }
+            }
+            TerminalStateGuard
+        };
+        
+        // Launch editor
+        let mut child = TokioCommand::new(&editor)
+            .arg(&temp_file)
+            .spawn()
+            .map_err(|e| crate::error::AppError::Generic(format!("Failed to launch editor: {}", e)))?;
+        
+        // Wait for editor to exit
+        let exit_status = child.wait().await
+            .map_err(|e| crate::error::AppError::Generic(format!("Editor process error: {}", e)))?;
+        
+        // Guard will restore terminal state when it goes out of scope
+        drop(_guard);
+        
+        // Force complete terminal redraw after returning from editor
+        {
+            use crossterm::{terminal, cursor, execute, queue};
+            use std::io::{stdout, Write};
+            
+            let mut stdout = stdout();
+            
+            // Comprehensive terminal reset
+            let _ = queue!(
+                stdout,
+                // Clear entire screen and scrollback
+                terminal::Clear(terminal::ClearType::All),
+                terminal::Clear(terminal::ClearType::Purge),
+                // Reset cursor to top-left
+                cursor::MoveTo(0, 0),
+                // Hide cursor temporarily
+                cursor::Hide,
+                // Show cursor again
+                cursor::Show
+            );
+            
+            // Force immediate flush to ensure all commands are executed
+            let _ = stdout.flush();
+        }
+        
+        // Request full redraw to ensure TUI framework redraws everything
+        app_state.request_full_redraw();
+        
+        if exit_status.success() {
+            // Read the edited content
+            match fs::read_to_string(&temp_file) {
+                Ok(new_content) => {
+                    // Check if content changed
+                    if new_content != current_value {
+                        // Update the value in Redis
+                        if let Some(connection) = app_state.get_active_connection_mut() {
+                            match connection.set_string(&key_name, &new_content).await {
+                                Ok(_result) => {
+                                    // Update the local value
+                                    app_state.ui_state.key_viewer.value = Some(
+                                        crate::redis::value_types::RedisValue::String(new_content)
+                                    );
+                                    app_state.set_status(format!("Updated key: {}", key_name));
+                                }
+                                Err(err) => {
+                                    app_state.set_status(format!("Failed to update key: {}", err));
+                                }
+                            }
+                        } else {
+                            app_state.set_status("No active connection".to_string());
+                        }
+                    } else {
+                        app_state.set_status("No changes made".to_string());
+                    }
+                }
+                Err(err) => {
+                    app_state.set_status(format!("Failed to read edited file: {}", err));
+                }
+            }
+        } else {
+            app_state.set_status("Editor exited with error".to_string());
+        }
+        
+        // Clean up temp file
+        let _ = fs::remove_file(&temp_file);
+        
+        Ok(())
+    }
+
     /// Load key value and metadata into Key Viewer panel
     async fn load_key_value(app_state: &mut AppState, key_name: &str) -> AppResult<()> {
         if let Some(connection) = app_state.get_active_connection_mut() {

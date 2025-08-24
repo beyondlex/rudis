@@ -43,6 +43,9 @@ pub struct AppState {
     
     /// UI state for different panels
     pub ui_state: UiState,
+    
+    /// Flag to indicate if a full terminal redraw is needed
+    pub needs_full_redraw: bool,
 }
 
 /// Key metadata information
@@ -118,6 +121,7 @@ impl AppState {
             event_tx,
             status_message: None,
             ui_state: UiState::default(),
+            needs_full_redraw: false,
         }
     }
 
@@ -198,6 +202,18 @@ impl AppState {
             FocusedPanel::KeyViewer => FocusedPanel::DatabaseBrowser,
             FocusedPanel::CommandInput => FocusedPanel::KeyViewer,
         };
+    }
+    
+    /// Request a full terminal redraw (needed after external editor)
+    pub fn request_full_redraw(&mut self) {
+        self.needs_full_redraw = true;
+    }
+    
+    /// Check if full redraw is needed and reset the flag
+    pub fn take_full_redraw_flag(&mut self) -> bool {
+        let needs_redraw = self.needs_full_redraw;
+        self.needs_full_redraw = false;
+        needs_redraw
     }
 
 

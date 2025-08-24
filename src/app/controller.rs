@@ -29,6 +29,12 @@ impl AppController {
         self.state.set_status("RUDIS - Redis TUI Client Started".to_string());
 
         while self.state.running {
+            // Check if a full redraw is needed (e.g., after external editor)
+            if self.state.take_full_redraw_flag() {
+                // Force the terminal backend to clear and redraw everything
+                terminal.clear()?;
+            }
+            
             // Draw the UI
             terminal.draw(|frame| self.render(frame))?;
             
