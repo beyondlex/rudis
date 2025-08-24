@@ -4,6 +4,7 @@ use crossterm::terminal;
 
 impl AppState {
     /// Calculate the visible key count based on available display area
+    /// This should match the renderer's calculation exactly
     pub fn get_visible_key_count() -> usize {
         // Calculate a more dynamic viewport size based on typical terminal constraints
         // This should roughly match what the renderer calculates
@@ -22,15 +23,36 @@ impl AppState {
             
             if terminal_height > reserved_lines {
                 let available_height = terminal_height - reserved_lines;
-                // Use a reasonable portion for the keys area, but cap at 15 for usability
-                // available_height.min(15).max(3) // Minimum 3, maximum 15 keys visible
-                available_height.max(3) // Minimum 3, maximum 15 keys visible
+                // Use the same logic as renderer: available_lines.min(calculated_max)
+                // Remove the .min(15) cap to match renderer behavior exactly
+                available_height.max(3) // Minimum 3 keys visible
             } else {
                 // Fallback for very small terminals
                 3
             }
         } else {
             // Fallback when terminal size cannot be determined
+            10
+        }
+    }
+    
+    /// Calculate the actual viewport size that the renderer will use
+    /// This matches the renderer's calculation: available_lines.min(get_visible_key_count())
+    pub fn get_actual_viewport_size() -> usize {
+        if let Ok(size) = crossterm::terminal::size() {
+            let terminal_height = size.1 as usize;
+            let reserved_lines = 3 + 4 + 3 + 3 + 3; // Same as above
+            
+            if terminal_height > reserved_lines {
+                let available_height = terminal_height - reserved_lines;
+                // This is exactly what the renderer does:
+                // let available_lines = keys_area.height as usize;
+                // let keys_to_display = available_lines.min(AppState::get_visible_key_count());
+                available_height.min(Self::get_visible_key_count())
+            } else {
+                3
+            }
+        } else {
             10
         }
     }
@@ -45,7 +67,7 @@ impl AppState {
             browser.keys.len()
         };
         
-        let visible_items = Self::get_visible_key_count();
+        let visible_items = Self::get_actual_viewport_size();
         
         if total_items > visible_items {
             total_items - visible_items
@@ -65,8 +87,8 @@ impl AppState {
             browser.keys.len()
         };
         
-        // Use provided viewport size or fallback to default
-        let visible_items = viewport_size.unwrap_or_else(|| Self::get_visible_key_count());
+        // Use provided viewport size or fallback to actual viewport size that matches renderer
+        let visible_items = viewport_size.unwrap_or_else(|| Self::get_actual_viewport_size());
         
         // Ensure scroll_offset is within valid bounds
         let max_scroll_offset = if total_items > visible_items {
@@ -96,8 +118,8 @@ impl AppState {
                 browser.selected_key_index = (browser.selected_key_index + 1).min(visible_count - 1);
                 
                 if old_index != browser.selected_key_index {
-                    // Adjust scroll offset if needed - use dynamic display count
-                    let display_count = Self::get_visible_key_count();
+                    // Adjust scroll offset if needed - use ACTUAL viewport size to match renderer
+                    let display_count = Self::get_actual_viewport_size();
                     let total_items = browser.key_tree.visible_count();
                     let max_scroll_offset = if total_items > display_count {
                         total_items - display_count
@@ -130,8 +152,8 @@ impl AppState {
                 
                 // Only update if index actually changed
                 if old_index != browser.selected_key_index {
-                    // Adjust scroll offset if needed - use dynamic display count
-                    let display_count = Self::get_visible_key_count();
+                    // Adjust scroll offset if needed - use actual viewport size
+                    let display_count = Self::get_actual_viewport_size();
                     let total_items = browser.keys.len();
                     let max_scroll_offset = if total_items > display_count {
                         total_items - display_count
@@ -166,9 +188,22 @@ impl AppState {
                 browser.selected_key_index -= 1;
                 
                 if old_index != browser.selected_key_index {
-                    // Adjust scroll offset if needed
+                    // Adjust scroll offset if needed - use ACTUAL viewport size to match renderer
+                    let display_count = Self::get_actual_viewport_size();
+                    let total_items = browser.key_tree.visible_count();
+                    let max_scroll_offset = if total_items > display_count {
+                        total_items - display_count
+                    } else {
+                        0
+                    };
+                    
+                    // Comprehensive scroll adjustment for upward navigation
                     if browser.selected_key_index < browser.scroll_offset {
+                        // Cursor moved above visible area - adjust scroll to keep it visible
                         browser.scroll_offset = browser.selected_key_index;
+                    } else if browser.selected_key_index >= browser.scroll_offset + display_count {
+                        // Cursor moved below visible area (shouldn't happen in prev, but ensure consistency)
+                        browser.scroll_offset = (browser.selected_key_index - display_count + 1).min(max_scroll_offset);
                     }
                     
                     // Update selected key from tree
@@ -226,8 +261,8 @@ impl AppState {
         if old_index != new_index {
             browser.selected_key_index = new_index;
             
-            // Adjust scroll offset for the new position - use dynamic display count
-            let display_count = Self::get_visible_key_count();
+            // Adjust scroll offset for the new position - use actual viewport size
+            let display_count = Self::get_actual_viewport_size();
             let total_items = browser.keys.len();
             let max_scroll_offset = if total_items > display_count {
                 total_items - display_count

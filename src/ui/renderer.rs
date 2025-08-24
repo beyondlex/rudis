@@ -253,12 +253,12 @@ impl AppRenderer {
         if browser_state.use_tree_view {
             // Tree view display
             let visible_nodes = browser_state.key_tree.visible_nodes.iter()
-                .enumerate()
                 .skip(browser_state.scroll_offset)
-                .take(keys_to_display);
+                .take(keys_to_display)
+                .enumerate();  // Enumerate AFTER skip/take to get correct display positions
             
-            for (i, _node_path) in visible_nodes {
-                let actual_index = browser_state.scroll_offset + i;
+            for (display_position, _node_path) in visible_nodes {
+                let actual_index = browser_state.scroll_offset + display_position;
                 let is_selected = actual_index == browser_state.selected_key_index;
                 let marker = if is_selected { "> " } else { "  " };
                 
@@ -328,10 +328,11 @@ impl AppRenderer {
             // Flat list display
             let visible_keys = browser_state.keys.iter()
                 .skip(browser_state.scroll_offset)
-                .take(keys_to_display);
+                .take(keys_to_display)
+                .enumerate();  // Enumerate AFTER skip/take to get correct display positions
             
-            for (i, key_info) in visible_keys.enumerate() {
-                let actual_index = browser_state.scroll_offset + i;
+            for (display_position, key_info) in visible_keys {
+                let actual_index = browser_state.scroll_offset + display_position;
                 let is_selected = actual_index == browser_state.selected_key_index;
                 let marker = if is_selected { "> " } else { "  " };
                 
