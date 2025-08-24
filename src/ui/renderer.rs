@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState},
     prelude::Stylize,
 };
 
@@ -369,6 +369,34 @@ impl AppRenderer {
             Paragraph::new(keys_content.trim_end()).style(style),
             keys_area,
         );
+        
+        // Render scrollbar if there are enough keys to scroll
+        let total_items = if browser_state.use_tree_view {
+            browser_state.key_tree.visible_count()
+        } else {
+            browser_state.keys.len()
+        };
+        
+        if total_items > keys_to_display {
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼"))
+                .track_symbol(Some("┃"))
+                .thumb_symbol("█");
+                
+            // Create scrollbar state with actual viewport size used in rendering
+            // This ensures the scrollbar position accurately reflects the visual scroll state
+            let mut scrollbar_state = ScrollbarState::default()
+                .content_length(total_items)
+                .viewport_content_length(keys_to_display)
+                .position(browser_state.scroll_offset);
+                
+            frame.render_stateful_widget(
+                scrollbar,
+                keys_area,
+                &mut scrollbar_state,
+            );
+        }
         
         // Render help and status area
         let mut help_content = String::new();

@@ -247,6 +247,8 @@ impl EventHandler {
                     if let Some(key_info) = app_state.ui_state.database_browser.keys.first() {
                         app_state.selected_key = Some(key_info.name.clone());
                     }
+                    // Update scrollbar state
+                    app_state.update_scrollbar_state(None);
                 }
             }
             (_, KeyCode::End) => {
@@ -254,15 +256,19 @@ impl EventHandler {
                     let keys_len = app_state.ui_state.database_browser.keys.len();
                     if keys_len > 0 {
                         app_state.ui_state.database_browser.selected_key_index = keys_len - 1;
-                        // Adjust scroll offset to show the last key
-                        let visible_count = 10;
+                        // Adjust scroll offset to show the last key - use proper calculation
+                        let visible_count = crate::app::AppState::get_visible_key_count();
                         if keys_len > visible_count {
                             app_state.ui_state.database_browser.scroll_offset = keys_len - visible_count;
+                        } else {
+                            app_state.ui_state.database_browser.scroll_offset = 0;
                         }
                         // Update selected key
                         if let Some(key_info) = app_state.ui_state.database_browser.keys.last() {
                             app_state.selected_key = Some(key_info.name.clone());
                         }
+                        // Update scrollbar state
+                        app_state.update_scrollbar_state(None);
                     }
                 }
             }
