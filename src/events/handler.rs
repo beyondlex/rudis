@@ -182,6 +182,11 @@ impl EventHandler {
             (_, KeyCode::Down) => {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     app_state.select_next_key();
+                    // Automatically load the selected key value
+                    if let Some(key_info) = app_state.get_selected_key_info() {
+                        let key_name = key_info.name.clone();
+                        let _ = Self::load_key_value(app_state, &key_name).await;
+                    }
                     // Only load more keys if we're very close to the end to avoid blocking
                     let browser = &app_state.ui_state.database_browser;
                     if !browser.scan_complete && 
@@ -195,6 +200,11 @@ impl EventHandler {
             (_, KeyCode::Up) => {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     app_state.select_previous_key();
+                    // Automatically load the selected key value
+                    if let Some(key_info) = app_state.get_selected_key_info() {
+                        let key_name = key_info.name.clone();
+                        let _ = Self::load_key_value(app_state, &key_name).await;
+                    }
                 }
             }
             (_, KeyCode::Right) => {
@@ -229,12 +239,22 @@ impl EventHandler {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     // Move up by 5 keys in one operation for better performance
                     app_state.select_key_by_offset(-5);
+                    // Automatically load the selected key value
+                    if let Some(key_info) = app_state.get_selected_key_info() {
+                        let key_name = key_info.name.clone();
+                        let _ = Self::load_key_value(app_state, &key_name).await;
+                    }
                 }
             }
             (_, KeyCode::PageDown) => {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     // Move down by 5 keys in one operation for better performance
                     app_state.select_key_by_offset(5);
+                    // Automatically load the selected key value
+                    if let Some(key_info) = app_state.get_selected_key_info() {
+                        let key_name = key_info.name.clone();
+                        let _ = Self::load_key_value(app_state, &key_name).await;
+                    }
                 }
             }
             
@@ -243,12 +263,19 @@ impl EventHandler {
                 if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     app_state.ui_state.database_browser.selected_key_index = 0;
                     app_state.ui_state.database_browser.scroll_offset = 0;
-                    // Update selected key
-                    if let Some(key_info) = app_state.ui_state.database_browser.keys.first() {
+                    // Update selected key and get name for loading
+                    let key_name_to_load = if let Some(key_info) = app_state.ui_state.database_browser.keys.first() {
                         app_state.selected_key = Some(key_info.name.clone());
-                    }
+                        Some(key_info.name.clone())
+                    } else {
+                        None
+                    };
                     // Update scrollbar state
                     app_state.update_scrollbar_state(None);
+                    // Load the key value if we have a selected key
+                    if let Some(key_name) = key_name_to_load {
+                        let _ = Self::load_key_value(app_state, &key_name).await;
+                    }
                 }
             }
             (_, KeyCode::End) => {
@@ -263,12 +290,19 @@ impl EventHandler {
                         } else {
                             app_state.ui_state.database_browser.scroll_offset = 0;
                         }
-                        // Update selected key
-                        if let Some(key_info) = app_state.ui_state.database_browser.keys.last() {
+                        // Update selected key and get name for loading
+                        let key_name_to_load = if let Some(key_info) = app_state.ui_state.database_browser.keys.last() {
                             app_state.selected_key = Some(key_info.name.clone());
-                        }
+                            Some(key_info.name.clone())
+                        } else {
+                            None
+                        };
                         // Update scrollbar state
                         app_state.update_scrollbar_state(None);
+                        // Load the key value if we have a selected key
+                        if let Some(key_name) = key_name_to_load {
+                            let _ = Self::load_key_value(app_state, &key_name).await;
+                        }
                     }
                 }
             }
