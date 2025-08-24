@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Row, Cell},
     prelude::Stylize,
 };
 
@@ -425,39 +425,294 @@ impl AppRenderer {
         // we can't modify state here. The fix will be applied in the calling code.
     }
 
+    /// Renders a list value as a table with id and value columns
+    fn render_list_table(
+        state: &AppState,
+        frame: &mut Frame,
+        area: Rect,
+        elements: &[String],
+        title: &str,
+        border_style: Style,
+    ) {
+        let viewer_state = &state.ui_state.key_viewer;
+        
+        // Create table headers
+        let headers = ["ID", "Value"]
+            .iter()
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .collect::<Vec<_>>();
+        
+        // Create table rows from list elements
+        let rows: Vec<Row> = elements
+            .iter()
+            .enumerate()
+            .map(|(index, element)| {
+                let is_selected = viewer_state.list_element_index == index;
+                let row_style = if is_selected {
+                    Style::default().bg(Color::DarkGray)
+                } else {
+                    Style::default()
+                };
+                
+                // Truncate long values for table display
+                let display_value = if element.len() > 60 {
+                    format!("{}...", &element[..57])
+                } else {
+                    element.clone()
+                };
+                
+                Row::new(vec![
+                    Cell::from((index + 1).to_string()).style(Style::default().fg(Color::Gray)),
+                    Cell::from(display_value).style(Style::default().fg(Color::White)),
+                ]).style(row_style)
+            })
+            .collect();
+        
+        // Create table widget
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(6),  // ID column
+                Constraint::Percentage(90), // Value column
+            ]
+        )
+        .header(Row::new(headers).style(Style::default().bg(Color::Blue)))
+        .block(
+            Block::bordered()
+                .title(title)
+                .border_style(border_style)
+        )
+        .column_spacing(1);
+        
+        frame.render_widget(table, area);
+    }
+
+    /// Renders a set value as a table with id and value columns
+    fn render_set_table(
+        state: &AppState,
+        frame: &mut Frame,
+        area: Rect,
+        members: &[String],
+        title: &str,
+        border_style: Style,
+    ) {
+        let viewer_state = &state.ui_state.key_viewer;
+        
+        // Create table headers
+        let headers = ["ID", "Value"]
+            .iter()
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .collect::<Vec<_>>();
+        
+        // Create table rows from set members
+        let rows: Vec<Row> = members
+            .iter()
+            .enumerate()
+            .map(|(index, member)| {
+                let is_selected = viewer_state.set_member_index == index;
+                let row_style = if is_selected {
+                    Style::default().bg(Color::DarkGray)
+                } else {
+                    Style::default()
+                };
+                
+                // Truncate long values for table display
+                let display_value = if member.len() > 60 {
+                    format!("{}...", &member[..57])
+                } else {
+                    member.clone()
+                };
+                
+                Row::new(vec![
+                    Cell::from((index + 1).to_string()).style(Style::default().fg(Color::Gray)),
+                    Cell::from(display_value).style(Style::default().fg(Color::White)),
+                ]).style(row_style)
+            })
+            .collect();
+        
+        // Create table widget
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(6),  // ID column
+                Constraint::Percentage(90), // Value column
+            ]
+        )
+        .header(Row::new(headers).style(Style::default().bg(Color::Blue)))
+        .block(
+            Block::bordered()
+                .title(title)
+                .border_style(border_style)
+        )
+        .column_spacing(1);
+        
+        frame.render_widget(table, area);
+    }
+
+    /// Renders a zset value as a table with id, score, and member columns
+    fn render_zset_table(
+        state: &AppState,
+        frame: &mut Frame,
+        area: Rect,
+        members: &[(String, f64)],
+        title: &str,
+        border_style: Style,
+    ) {
+        let viewer_state = &state.ui_state.key_viewer;
+        
+        // Create table headers
+        let headers = ["ID", "Score", "Member"]
+            .iter()
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .collect::<Vec<_>>();
+        
+        // Create table rows from zset members
+        let rows: Vec<Row> = members
+            .iter()
+            .enumerate()
+            .map(|(index, (member, score))| {
+                let is_selected = viewer_state.zset_member_index == index;
+                let row_style = if is_selected {
+                    Style::default().bg(Color::DarkGray)
+                } else {
+                    Style::default()
+                };
+                
+                // Truncate long member names for table display
+                let display_member = if member.len() > 35 {
+                    format!("{}...", &member[..32])
+                } else {
+                    member.clone()
+                };
+                
+                Row::new(vec![
+                    Cell::from((index + 1).to_string()).style(Style::default().fg(Color::Gray)),
+                    Cell::from(format!("{:.2}", score)).style(Style::default().fg(Color::Yellow)),
+                    Cell::from(display_member).style(Style::default().fg(Color::White)),
+                ]).style(row_style)
+            })
+            .collect();
+        
+        // Create table widget
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(6),  // ID column
+                Constraint::Length(12), // Score column
+                Constraint::Percentage(80), // Member column
+            ]
+        )
+        .header(Row::new(headers).style(Style::default().bg(Color::Blue)))
+        .block(
+            Block::bordered()
+                .title(title)
+                .border_style(border_style)
+        )
+        .column_spacing(1);
+        
+        frame.render_widget(table, area);
+    }
+
+    /// Renders a hash value as a table with id, key, value, TTL columns
+    fn render_hash_table(
+        state: &AppState,
+        frame: &mut Frame,
+        area: Rect,
+        key_name: &str,
+        fields: &[(String, String)],
+        title: &str,
+        border_style: Style,
+    ) {
+        let viewer_state = &state.ui_state.key_viewer;
+        
+        // Get TTL from metadata
+        let ttl_value = viewer_state.metadata
+            .as_ref()
+            .and_then(|m| m.ttl)
+            .unwrap_or(-1);
+        
+        // Create table headers
+        let headers = ["ID", "Key", "Value", "TTL"]
+            .iter()
+            // .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()))
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Black).bold()))
+            .collect::<Vec<_>>();
+        
+        // Create table rows from hash fields
+        let rows: Vec<Row> = fields
+            .iter()
+            .enumerate()
+            .map(|(index, (field_key, field_value))| {
+                let is_selected = viewer_state.hash_field_index == index;
+                let row_style = if is_selected {
+                    Style::default().bg(Color::DarkGray)
+                } else {
+                    Style::default()
+                };
+                
+                // Truncate long values for table display
+                let display_key = if field_key.len() > 20 {
+                    format!("{}...", &field_key[..17])
+                } else {
+                    field_key.clone()
+                };
+                
+                let display_value = if field_value.len() > 30 {
+                    format!("{}...", &field_value[..27])
+                } else {
+                    field_value.clone()
+                };
+                
+                let ttl_display = if ttl_value == -1 {
+                    "-1".to_string()
+                } else {
+                    ttl_value.to_string()
+                };
+                
+                Row::new(vec![
+                    Cell::from((index + 1).to_string()).style(Style::default().fg(Color::Gray)),
+                    Cell::from(display_key).style(Style::default().fg(Color::Cyan)),
+                    Cell::from(display_value).style(Style::default().fg(Color::White)),
+                    Cell::from(ttl_display).style(Style::default().fg(Color::Yellow)),
+                ]).style(row_style)
+            })
+            .collect();
+        
+        // Create table widget
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(4),  // ID column
+                Constraint::Percentage(35), // Key column  
+                Constraint::Percentage(45), // Value column
+                Constraint::Length(10), // TTL column
+            ]
+        )
+        .header(Row::new(headers).style(Style::default().bg(Color::Blue)))
+        .block(
+            Block::bordered()
+                .title(title)
+                .border_style(border_style)
+        )
+        .column_spacing(1);
+        
+        frame.render_widget(table, area);
+    }
+
     /// Renders the key viewer panel
     fn render_key_viewer_panel(state: &AppState, frame: &mut Frame, area: Rect) {
         let viewer_state = &state.ui_state.key_viewer;
         
         let viewer_title = if let Some(key_name) = &viewer_state.current_key {
-            format!("Key Viewer - {}", key_name)
+            // Get the data type from the current value
+            let type_info = if let Some(value) = &viewer_state.value {
+                format!(" ({})", value.type_name())
+            } else {
+                String::new()
+            };
+            format!("Key Viewer - {}{}", key_name, type_info)
         } else {
             "Key Viewer".to_string()
-        };
-        
-        let viewer_content = if viewer_state.loading {
-            "Loading key value...".to_string()
-        } else if let (Some(key_name), Some(value)) = (&viewer_state.current_key, &viewer_state.value) {
-            // Use the value display component to render the content
-            let display_lines = crate::ui::ValueDisplayComponent::render_value(
-                key_name.clone(),
-                value,
-                viewer_state,
-                20, // Max display items
-            );
-            
-            // Convert lines to text for display
-            display_lines.into_iter()
-                .map(|line| {
-                    line.spans.into_iter()
-                        .map(|span| span.content.to_string())
-                        .collect::<Vec<_>>()
-                        .join("")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            "Select a key to view its content\n\nShortcuts:\n→ View selected key\nEnter: Refresh value\ne: Edit mode\nc: Copy value".to_string()
         };
         
         // Style based on focus
@@ -473,15 +728,82 @@ impl AppRenderer {
             Style::default().fg(Color::Gray)
         };
         
-        frame.render_widget(
-            Paragraph::new(viewer_content)
-                .block(Block::bordered()
-                    .title(viewer_title)
-                    .border_style(border_style))
-                .style(style)
-                .wrap(Wrap { trim: true }),
-            area,
-        );
+        if viewer_state.loading {
+            frame.render_widget(
+                Paragraph::new("Loading key value...")
+                    .block(Block::bordered()
+                        .title(viewer_title)
+                        .border_style(border_style))
+                    .style(style),
+                area,
+            );
+            return;
+        }
+        
+        if let (Some(key_name), Some(value)) = (&viewer_state.current_key, &viewer_state.value) {
+            // Check value type and render with appropriate table format
+            match value {
+                crate::redis::value_types::RedisValue::Hash(fields) => {
+                    Self::render_hash_table(state, frame, area, key_name, fields, &viewer_title, border_style);
+                    return;
+                }
+                crate::redis::value_types::RedisValue::List(elements) => {
+                    Self::render_list_table(state, frame, area, elements, &viewer_title, border_style);
+                    return;
+                }
+                crate::redis::value_types::RedisValue::Set(members) => {
+                    Self::render_set_table(state, frame, area, members, &viewer_title, border_style);
+                    return;
+                }
+                crate::redis::value_types::RedisValue::ZSet(members) => {
+                    Self::render_zset_table(state, frame, area, members, &viewer_title, border_style);
+                    return;
+                }
+                _ => {
+                    // For all other types, use the existing line-based rendering
+                }
+            }
+            
+            // For all other types, use the existing line-based rendering
+            let display_lines = crate::ui::ValueDisplayComponent::render_value(
+                key_name.clone(),
+                value,
+                viewer_state,
+                20, // Max display items
+            );
+            
+            // Convert lines to text for display
+            let viewer_content = display_lines.into_iter()
+                .map(|line| {
+                    line.spans.into_iter()
+                        .map(|span| span.content.to_string())
+                        .collect::<Vec<_>>()
+                        .join("")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            
+            frame.render_widget(
+                Paragraph::new(viewer_content)
+                    .block(Block::bordered()
+                        .title(viewer_title)
+                        .border_style(border_style))
+                    .style(style)
+                    .wrap(Wrap { trim: true }),
+                area,
+            );
+        } else {
+            let default_content = "Select a key to view its content\n\nShortcuts:\n→ View selected key\nEnter: Refresh value\ne: Edit mode\nc: Copy value";
+            frame.render_widget(
+                Paragraph::new(default_content)
+                    .block(Block::bordered()
+                        .title(viewer_title)
+                        .border_style(border_style))
+                    .style(style)
+                    .wrap(Wrap { trim: true }),
+                area,
+            );
+        }
     }
 
     /// Renders the command input panel
