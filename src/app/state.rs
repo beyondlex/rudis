@@ -1783,6 +1783,14 @@ impl AppState {
         Ok(())
     }
     
+    /// Calculate the visible key count based on available display area
+    fn get_visible_key_count() -> usize {
+        // This should ideally be calculated from the actual display area
+        // For now, we use a reasonable default that works with most terminal sizes
+        // The renderer will adjust keys_to_display based on actual available space
+        10
+    }
+    
     /// Select next key in the browser - optimized for performance
     pub fn select_next_key(&mut self) {
         let browser = &mut self.ui_state.database_browser;
@@ -1795,8 +1803,8 @@ impl AppState {
                 browser.selected_key_index = (browser.selected_key_index + 1).min(visible_count - 1);
                 
                 if old_index != browser.selected_key_index {
-                    // Adjust scroll offset if needed
-                    let display_count = 10;
+                    // Adjust scroll offset if needed - use dynamic display count
+                    let display_count = Self::get_visible_key_count();
                     if browser.selected_key_index >= browser.scroll_offset + display_count {
                         browser.scroll_offset = browser.selected_key_index - display_count + 1;
                     }
@@ -1822,10 +1830,10 @@ impl AppState {
                 
                 // Only update if index actually changed
                 if old_index != browser.selected_key_index {
-                    // Adjust scroll offset if needed
-                    let visible_count = 10; // Number of keys visible at once
-                    if browser.selected_key_index >= browser.scroll_offset + visible_count {
-                        browser.scroll_offset = browser.selected_key_index - visible_count + 1;
+                    // Adjust scroll offset if needed - use dynamic display count
+                    let display_count = Self::get_visible_key_count();
+                    if browser.selected_key_index >= browser.scroll_offset + display_count {
+                        browser.scroll_offset = browser.selected_key_index - display_count + 1;
                     }
                     
                     // Update selected key - use reference to avoid cloning when possible
@@ -1905,10 +1913,10 @@ impl AppState {
         if old_index != new_index {
             browser.selected_key_index = new_index;
             
-            // Adjust scroll offset for the new position
-            let visible_count = 10;
-            if browser.selected_key_index >= browser.scroll_offset + visible_count {
-                browser.scroll_offset = browser.selected_key_index - visible_count + 1;
+            // Adjust scroll offset for the new position - use dynamic display count
+            let display_count = Self::get_visible_key_count();
+            if browser.selected_key_index >= browser.scroll_offset + display_count {
+                browser.scroll_offset = browser.selected_key_index - display_count + 1;
             } else if browser.selected_key_index < browser.scroll_offset {
                 browser.scroll_offset = browser.selected_key_index;
             }

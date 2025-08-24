@@ -145,7 +145,7 @@ impl AppRenderer {
         let browser_state = &state.ui_state.database_browser;
         let db_title = if state.active_connection.is_some() {
             if browser_state.search_mode {
-                format!("Database {} - Search: {}_", 
+                format!("Database {} - Search: {}", 
                     browser_state.selected_database,
                     browser_state.filter_pattern)
             } else if !browser_state.filter_pattern.is_empty() {
@@ -162,155 +162,6 @@ impl AppRenderer {
             "Database Browser".to_string()
         };
         
-        let db_content = if state.active_connection.is_some() {
-            if browser_state.search_mode {
-                // In search mode, show search instructions
-                format!("Search Mode\n\nPattern: {}\n\nType to search, Enter to apply\nEsc to cancel search", 
-                    if browser_state.filter_pattern.is_empty() { 
-                        "<type pattern>"
-                    } else { 
-                        &browser_state.filter_pattern 
-                    })
-            } else if browser_state.keys.is_empty() {
-                if browser_state.loading {
-                    "Loading keys...".to_string()
-                } else {
-                    "No keys found\n\nPress 'r' to refresh\nPress '/' to search".to_string()
-                }
-            } else {
-                // Show list of keys - either as tree or flat list
-                let mut content = String::new();
-                
-                if browser_state.use_tree_view {
-                    // Tree view display
-                    let visible_nodes = browser_state.key_tree.visible_nodes.iter()
-                        .enumerate()
-                        .skip(browser_state.scroll_offset)
-                        .take(10); // Show up to 10 nodes at once
-                    
-                    for (i, _node_path) in visible_nodes {
-                        let actual_index = browser_state.scroll_offset + i;
-                        let is_selected = actual_index == browser_state.selected_key_index;
-                        let marker = if is_selected { "> " } else { "  " };
-                        
-                        if let Some(display_info) = browser_state.key_tree.get_visible_node_info(actual_index) {
-                            // Create indentation based on depth
-                            let indent = "  ".repeat(display_info.depth);
-                            
-                            if display_info.is_key {
-                                // This is an actual Redis key
-                                let type_icon = if let Some(key_info) = &display_info.key_info {
-                                    match key_info.key_type.as_deref() {
-                                        Some("string") => "🔤", // 🔤
-                                        Some("hash") => "📋", // 📋
-                                        Some("list") => "📜", // 📜
-                                        Some("set") => "📊", // 📊
-                                        Some("zset") => "📊", // 📊
-                                        Some("stream") => "🌊", // 🌊
-                                        _ => "●", // ● (unknown)
-                                    }
-                                } else {
-                                    "●"
-                                };
-                                
-                                // Add TTL info if available
-                                let ttl_info = if let Some(key_info) = &display_info.key_info {
-                                    match key_info.ttl {
-                                        Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
-                                        Some(-1) => " (no exp)".to_string(),
-                                        _ => String::new(),
-                                    }
-                                } else {
-                                    String::new()
-                                };
-                                
-                                // Truncate long key names
-                                let display_name = if display_info.name.len() > 15 {
-                                    format!("{}...", &display_info.name[..12])
-                                } else {
-                                    display_info.name.clone()
-                                };
-                                
-                                // Add folder indicator if this key also has children
-                                let folder_indicator = if display_info.has_children {
-                                    if display_info.is_expanded {
-                                        " 📂"
-                                    } else {
-                                        " 📁"
-                                    }
-                                } else {
-                                    ""
-                                };
-                                
-                                content.push_str(&format!("{}{}{} {}{}{}\n", marker, indent, type_icon, display_name, ttl_info, folder_indicator));
-                            } else {
-                                // This is a folder/namespace node
-                                let folder_icon = if display_info.is_expanded {
-                                    "📂"
-                                } else {
-                                    "📁"
-                                };
-                                
-                                content.push_str(&format!("{}{}{} {}/\n", marker, indent, folder_icon, display_info.name));
-                            }
-                        }
-                    }
-                } else {
-                    // Flat list display (original implementation)
-                    let visible_keys = browser_state.keys.iter()
-                        .skip(browser_state.scroll_offset)
-                        .take(10); // Show up to 10 keys at once
-                    
-                    for (i, key_info) in visible_keys.enumerate() {
-                        let actual_index = browser_state.scroll_offset + i;
-                        let is_selected = actual_index == browser_state.selected_key_index;
-                        let marker = if is_selected { "> " } else { "  " };
-                        
-                        // Key type icon
-                        let type_icon = match key_info.key_type.as_deref() {
-                            Some("string") => "🔤", // 🔤
-                            Some("hash") => "📋", // 📋
-                            Some("list") => "📜", // 📜
-                            Some("set") => "📊", // 📊
-                            Some("zset") => "📊", // 📊
-                            Some("stream") => "🌊", // 🌊
-                            _ => "●", // ● (unknown)
-                        };
-                        
-                        // Add TTL info if available
-                        let ttl_info = match key_info.ttl {
-                            Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
-                            Some(-1) => " (no exp)".to_string(),
-                            _ => String::new(),
-                        };
-                        
-                        // Truncate long key names
-                        let display_name = if key_info.name.len() > 20 {
-                            format!("{}...", &key_info.name[..17])
-                        } else {
-                            key_info.name.clone()
-                        };
-                        
-                        content.push_str(&format!("{}{} {}{}\n", marker, type_icon, display_name, ttl_info));
-                    }
-                }
-                
-                if !browser_state.scan_complete {
-                    content.push_str("\n[More keys available - scroll down]");
-                }
-                
-                let help_text = if browser_state.use_tree_view {
-                    "r:Refresh /:Search t:List View Enter:Expand/Collapse del:Delete"
-                } else {
-                    "r:Refresh /:Search t:Tree View del:Delete"
-                };
-                content.push_str(&format!("\n{}", help_text));
-                content
-            }
-        } else {
-            "Select a connection\nto browse databases".to_string()
-        };
-        
         // Style based on focus
         let is_focused = matches!(state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser);
         let style = if is_focused {
@@ -324,13 +175,211 @@ impl AppRenderer {
             Style::default().fg(Color::Gray)
         };
         
+        // Create the main panel block
+        let main_block = Block::bordered()
+            .title(db_title)
+            .border_style(border_style);
+        let inner_area = main_block.inner(area);
+        frame.render_widget(main_block, area);
+        
+        if state.active_connection.is_none() {
+            // No connection - show message
+            frame.render_widget(
+                Paragraph::new("Select a connection\nto browse databases")
+                    .style(style),
+                inner_area,
+            );
+            return;
+        }
+        
+        if browser_state.search_mode {
+            // In search mode, show search instructions
+            let search_content = format!("Search Mode\n\nPattern: {}\n\nType to search, Enter to apply\nEsc to cancel search", 
+                if browser_state.filter_pattern.is_empty() { 
+                    "<type pattern>"
+                } else { 
+                    &browser_state.filter_pattern 
+                });
+            frame.render_widget(
+                Paragraph::new(search_content).style(style),
+                inner_area,
+            );
+            return;
+        }
+        
+        if browser_state.keys.is_empty() {
+            // No keys - show loading or empty message
+            let empty_content = if browser_state.loading {
+                "Loading keys...".to_string()
+            } else {
+                "No keys found\n\nPress 'r' to refresh\nPress '/' to search".to_string()
+            };
+            frame.render_widget(
+                Paragraph::new(empty_content).style(style),
+                inner_area,
+            );
+            return;
+        }
+        
+        // Calculate areas: keys area + help text area
+        let help_text = if browser_state.use_tree_view {
+            "r:Refresh /:Search t:List View Enter:Expand/Collapse del:Delete"
+        } else {
+            "r:Refresh /:Search t:Tree View del:Delete"
+        };
+        
+        // Reserve space for help text (1 line) and potential "more keys" message (1 line)
+        let reserved_lines = if !browser_state.scan_complete { 3 } else { 2 };
+        let keys_area_height = inner_area.height.saturating_sub(reserved_lines);
+        
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(keys_area_height), // Keys area
+                Constraint::Min(0),                    // Help/status area
+            ])
+            .split(inner_area);
+        
+        let keys_area = layout[0];
+        let help_area = layout[1];
+        
+        // Calculate how many keys can fit in the display area
+        let available_lines = keys_area.height as usize;
+        let keys_to_display = available_lines.min(10); // Max 10 keys, but respect available space
+        
+        // Render keys content
+        let mut keys_content = String::new();
+        
+        if browser_state.use_tree_view {
+            // Tree view display
+            let visible_nodes = browser_state.key_tree.visible_nodes.iter()
+                .enumerate()
+                .skip(browser_state.scroll_offset)
+                .take(keys_to_display);
+            
+            for (i, _node_path) in visible_nodes {
+                let actual_index = browser_state.scroll_offset + i;
+                let is_selected = actual_index == browser_state.selected_key_index;
+                let marker = if is_selected { "> " } else { "  " };
+                
+                if let Some(display_info) = browser_state.key_tree.get_visible_node_info(actual_index) {
+                    // Create indentation based on depth
+                    let indent = "  ".repeat(display_info.depth);
+                    
+                    if display_info.is_key {
+                        // This is an actual Redis key
+                        let type_icon = if let Some(key_info) = &display_info.key_info {
+                            match key_info.key_type.as_deref() {
+                                Some("string") => "🔤",
+                                Some("hash") => "📋",
+                                Some("list") => "📜",
+                                Some("set") => "📊",
+                                Some("zset") => "📊",
+                                Some("stream") => "🌊",
+                                _ => "●",
+                            }
+                        } else {
+                            "●"
+                        };
+                        
+                        // Add TTL info if available
+                        let ttl_info = if let Some(key_info) = &display_info.key_info {
+                            match key_info.ttl {
+                                Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
+                                Some(-1) => " (no exp)".to_string(),
+                                _ => String::new(),
+                            }
+                        } else {
+                            String::new()
+                        };
+                        
+                        // Truncate long key names
+                        let display_name = if display_info.name.len() > 15 {
+                            format!("{}...", &display_info.name[..12])
+                        } else {
+                            display_info.name.clone()
+                        };
+                        
+                        // Add folder indicator if this key also has children
+                        let folder_indicator = if display_info.has_children {
+                            if display_info.is_expanded {
+                                " 📂"
+                            } else {
+                                " 📁"
+                            }
+                        } else {
+                            ""
+                        };
+                        
+                        keys_content.push_str(&format!("{}{}{} {}{}{}\n", marker, indent, type_icon, display_name, ttl_info, folder_indicator));
+                    } else {
+                        // This is a folder/namespace node
+                        let folder_icon = if display_info.is_expanded {
+                            "📂"
+                        } else {
+                            "📁"
+                        };
+                        
+                        keys_content.push_str(&format!("{}{}{} {}/\n", marker, indent, folder_icon, display_info.name));
+                    }
+                }
+            }
+        } else {
+            // Flat list display
+            let visible_keys = browser_state.keys.iter()
+                .skip(browser_state.scroll_offset)
+                .take(keys_to_display);
+            
+            for (i, key_info) in visible_keys.enumerate() {
+                let actual_index = browser_state.scroll_offset + i;
+                let is_selected = actual_index == browser_state.selected_key_index;
+                let marker = if is_selected { "> " } else { "  " };
+                
+                // Key type icon
+                let type_icon = match key_info.key_type.as_deref() {
+                    Some("string") => "🔤",
+                    Some("hash") => "📋",
+                    Some("list") => "📜",
+                    Some("set") => "📊",
+                    Some("zset") => "📊",
+                    Some("stream") => "🌊",
+                    _ => "●",
+                };
+                
+                // Add TTL info if available
+                let ttl_info = match key_info.ttl {
+                    Some(ttl) if ttl > 0 => format!(" ({}s)", ttl),
+                    Some(-1) => " (no exp)".to_string(),
+                    _ => String::new(),
+                };
+                
+                // Truncate long key names
+                let display_name = if key_info.name.len() > 20 {
+                    format!("{}...", &key_info.name[..17])
+                } else {
+                    key_info.name.clone()
+                };
+                
+                keys_content.push_str(&format!("{}{} {}{}\n", marker, type_icon, display_name, ttl_info));
+            }
+        }
+        
+        // Render keys content
         frame.render_widget(
-            Paragraph::new(db_content)
-                .block(Block::bordered()
-                    .title(db_title)
-                    .border_style(border_style))
-                .style(style),
-            area,
+            Paragraph::new(keys_content.trim_end()).style(style),
+            keys_area,
+        );
+        
+        // Render help and status area
+        let mut help_content = String::new();
+        if !browser_state.scan_complete {
+            help_content.push_str("[More keys available - scroll down]\n");
+        }
+        help_content.push_str(help_text);
+        
+        frame.render_widget(
+            Paragraph::new(help_content).style(style),
+            help_area,
         );
     }
 
