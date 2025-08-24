@@ -384,12 +384,20 @@ impl AppRenderer {
                 .track_symbol(Some("┃"))
                 .thumb_symbol("█");
                 
+            // Ensure scroll_offset is within valid bounds for the actual viewport size
+            let max_scroll_offset = if total_items > keys_to_display {
+                total_items - keys_to_display
+            } else {
+                0
+            };
+            let actual_scroll_offset = browser_state.scroll_offset.min(max_scroll_offset);
+            
             // Create scrollbar state with actual viewport size used in rendering
             // This ensures the scrollbar position accurately reflects the visual scroll state
             let mut scrollbar_state = ScrollbarState::default()
                 .content_length(total_items)
                 .viewport_content_length(keys_to_display)
-                .position(browser_state.scroll_offset);
+                .position(actual_scroll_offset);
                 
             frame.render_stateful_widget(
                 scrollbar,
@@ -409,6 +417,11 @@ impl AppRenderer {
             Paragraph::new(help_content).style(style),
             help_area,
         );
+        
+        // Update the app state's scrollbar state to match the actual rendered viewport
+        // This ensures consistency between navigation logic and visual rendering
+        // We need a mutable reference to state, but since this is a rendering function,
+        // we can't modify state here. The fix will be applied in the calling code.
     }
 
     /// Renders the key viewer panel

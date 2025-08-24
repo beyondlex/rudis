@@ -1,13 +1,37 @@
 use crate::error::AppResult;
 use super::state_core::AppState;
+use crossterm::terminal;
 
 impl AppState {
     /// Calculate the visible key count based on available display area
     pub fn get_visible_key_count() -> usize {
-        // This should ideally be calculated from the actual display area
-        // For now, we use a reasonable default that works with most terminal sizes
-        // The renderer will adjust keys_to_display based on actual available space
-        10
+        // Calculate a more dynamic viewport size based on typical terminal constraints
+        // This should roughly match what the renderer calculates
+        
+        // Get terminal size if available
+        if let Ok(size) = crossterm::terminal::size() {
+            let terminal_height = size.1 as usize;
+            
+            // Calculate available space for keys:
+            // - 3 lines for header
+            // - 4 lines for command input
+            // - 3 lines for footer
+            // - 3 lines for panel borders (database browser borders)
+            // - 2-3 lines for help text and status messages
+            let reserved_lines = 3 + 4 + 3 + 3 + 3; // Total: 16 lines
+            
+            if terminal_height > reserved_lines {
+                let available_height = terminal_height - reserved_lines;
+                // Use a reasonable portion for the keys area, but cap at 15 for usability
+                available_height.min(15).max(3) // Minimum 3, maximum 15 keys visible
+            } else {
+                // Fallback for very small terminals
+                3
+            }
+        } else {
+            // Fallback when terminal size cannot be determined
+            10
+        }
     }
     
     /// Calculate the maximum scroll offset for the current content
