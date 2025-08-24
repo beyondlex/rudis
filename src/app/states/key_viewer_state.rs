@@ -79,6 +79,10 @@ pub struct KeyViewerState {
     pub binary_display_mode: crate::ui::binary_viewer::DisplayMode,
     /// Whether to enable JSON syntax highlighting
     pub json_highlighting_enabled: bool,
+    /// Last key pressed for vim-like commands (e.g., yy)
+    pub last_key_pressed: Option<char>,
+    /// Timestamp of last key press for vim-like commands
+    pub last_key_time: Option<std::time::Instant>,
 }
 
 impl Default for KeyViewerState {
@@ -122,6 +126,8 @@ impl Default for KeyViewerState {
             stream_field_index: 0,
             binary_display_mode: crate::ui::binary_viewer::DisplayMode::Auto,
             json_highlighting_enabled: true,
+            last_key_pressed: None,
+            last_key_time: None,
         }
     }
 }
@@ -201,6 +207,49 @@ impl KeyViewerState {
         if self.edit_mode {
             self.edit_cursor_position = 0;
         }
+    }
+    
+    /// Handle vim-like key sequences (e.g., yy for copy)
+    /// Returns true if a command was executed, false otherwise
+    pub fn handle_vim_sequence(&mut self, key: char) -> bool {
+        const KEY_SEQUENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+        
+        let now = std::time::Instant::now();
+        
+        // Check if this is a continuation of a previous key sequence
+        let is_continuation = if let (Some(last_key), Some(last_time)) = (self.last_key_pressed, self.last_key_time) {
+            now.duration_since(last_time) < KEY_SEQUENCE_TIMEOUT && last_key == key
+        } else {
+            false
+        };
+        
+        // Handle yy command (copy value to clipboard)
+        if key == 'y' && is_continuation {
+            // Reset key tracking
+            self.last_key_pressed = None;
+            self.last_key_time = None;
+            
+            // Copy string value to clipboard
+            if let Some(crate::redis::value_types::RedisValue::String(value)) = &self.value {
+                return match crate::utils::ClipboardUtils::copy_to_clipboard(value) {
+                    Ok(()) => true,  // Command executed successfully
+                    Err(_) => false, // Command failed
+                };
+            }
+            return false;
+        }
+        
+        // Track the current key press
+        self.last_key_pressed = Some(key);
+        self.last_key_time = Some(now);
+        
+        false // No command executed
+    }
+    
+    /// Reset vim key sequence tracking
+    pub fn reset_vim_sequence(&mut self) {
+        self.last_key_pressed = None;
+        self.last_key_time = None;
     }
     
     /// Move cursor to end of line

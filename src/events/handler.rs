@@ -118,16 +118,48 @@ impl EventHandler {
                                 Self::open_external_editor(app_state).await?;
                             }
                         }
+                        'y' => {
+                            // Handle vim-like yy command for copying to clipboard
+                            if app_state.ui_state.key_viewer.handle_vim_sequence('y') {
+                                // yy command executed - copied to clipboard
+                                if let Some(key_name) = &app_state.ui_state.key_viewer.current_key {
+                                    app_state.set_status(format!("Copied value of '{}' to clipboard", key_name));
+                                } else {
+                                    app_state.set_status("Copied value to clipboard".to_string());
+                                }
+                            }
+                            // If not yy, the sequence tracking is still active for potential second 'y'
+                        }
                         'c' => {
+                            // Reset vim sequence when other keys are pressed
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
                             // Handle 'c' for connection dialog
                             app_state.open_connection_dialog();
                         }
-                        '1' => app_state.set_view(crate::app::ViewMode::ConnectionList),
-                        '2' => app_state.set_view(crate::app::ViewMode::DatabaseBrowser),
-                        '3' => app_state.set_view(crate::app::ViewMode::KeyViewer),
-                        '4' => app_state.set_view(crate::app::ViewMode::CommandInterface),
-                        '?' => app_state.set_view(crate::app::ViewMode::Help),
-                        _ => {}
+                        '1' => {
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
+                            app_state.set_view(crate::app::ViewMode::ConnectionList);
+                        }
+                        '2' => {
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
+                            app_state.set_view(crate::app::ViewMode::DatabaseBrowser);
+                        }
+                        '3' => {
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
+                            app_state.set_view(crate::app::ViewMode::KeyViewer);
+                        }
+                        '4' => {
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
+                            app_state.set_view(crate::app::ViewMode::CommandInterface);
+                        }
+                        '?' => {
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
+                            app_state.set_view(crate::app::ViewMode::Help);
+                        }
+                        _ => {
+                            // Reset vim sequence for any other character
+                            app_state.ui_state.key_viewer.reset_vim_sequence();
+                        }
                     }
                 } else if matches!(app_state.ui_state.focused_panel, FocusedPanel::DatabaseBrowser) {
                     if app_state.ui_state.database_browser.search_mode {
