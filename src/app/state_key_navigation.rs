@@ -23,7 +23,8 @@ impl AppState {
             if terminal_height > reserved_lines {
                 let available_height = terminal_height - reserved_lines;
                 // Use a reasonable portion for the keys area, but cap at 15 for usability
-                available_height.min(15).max(3) // Minimum 3, maximum 15 keys visible
+                // available_height.min(15).max(3) // Minimum 3, maximum 15 keys visible
+                available_height.max(3) // Minimum 3, maximum 15 keys visible
             } else {
                 // Fallback for very small terminals
                 3

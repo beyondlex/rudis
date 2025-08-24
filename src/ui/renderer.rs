@@ -245,7 +245,7 @@ impl AppRenderer {
         
         // Calculate how many keys can fit in the display area
         let available_lines = keys_area.height as usize;
-        let keys_to_display = available_lines.min(10); // Max 10 keys, but respect available space
+        let keys_to_display = available_lines.min(AppState::get_visible_key_count()); // Max 10 keys, but respect available space
         
         // Render keys content
         let mut keys_content = String::new();
